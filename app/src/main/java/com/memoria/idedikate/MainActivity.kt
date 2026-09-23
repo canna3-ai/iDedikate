@@ -78,6 +78,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import android.util.Log
 import androidx.credentials.CustomCredential
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
 import android.content.Context
 import android.content.ContextWrapper
 import kotlin.coroutines.cancellation.CancellationException
@@ -161,6 +162,9 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                         Log.d("Auth", "Google Sign In cancelled by user")
                     } catch (e: CancellationException) {
                         throw e
+                    } catch (e: NoCredentialException) {
+                        Log.w("Auth", "No Google account available", e)
+                        authViewModel.setErrorMessage("No Google account on this device — add one in Settings")
                     } catch (e: GetCredentialException) {
                         Log.e("Auth", "GetCredentialException", e)
                         authViewModel.setErrorMessage("Google Sign In failed: ${e.message}")

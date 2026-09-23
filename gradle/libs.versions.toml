@@ -47,13 +47,12 @@ firebaseBom = "33.7.0"
 mapsCompose = "4.3.3"
 playServicesMaps = "19.0.0"
 playServicesAds = "23.6.0"
-arCore = "1.46.0"
+arCore = "1.52.0"
 secretsGradlePlugin = "2.0.1"
-sceneform = "1.23.0"
+sceneview = "2.3.3"
 credentials = "1.3.0"
 googleid = "1.1.1"
 facebook = "17.0.0"
-fragmentCompose = "1.8.9"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -111,11 +110,10 @@ maps-compose = { group = "com.google.maps.android", name = "maps-compose", versi
 play-services-maps = { group = "com.google.android.gms", name = "play-services-maps", version.ref = "playServicesMaps" }
 play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 arcore = { group = "com.google.ar", name = "core", version.ref = "arCore" }
-sceneform = { group = "com.gorisse.thomas.sceneform", name = "sceneform", version.ref = "sceneform" }
+arsceneview = { group = "io.github.sceneview", name = "arsceneview", version.ref = "sceneview" }
 androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
 androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
 googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
-androidx-fragment-compose = { group = "androidx.fragment", name = "fragment-compose", version.ref = "fragmentCompose" }
 facebook-login = { group = "com.facebook.android", name = "facebook-login", version.ref = "facebook" }
 
 [plugins]

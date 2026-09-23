@@ -2,7 +2,7 @@ package com.memoria.idedikate.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.view.View
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,22 +21,31 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.fragment.app.FragmentActivity
-import androidx.fragment.compose.AndroidFragment
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
-import com.google.ar.sceneform.AnchorNode
-import com.google.ar.sceneform.ArSceneView
-import com.google.ar.sceneform.Node
-import com.google.ar.sceneform.math.Vector3
-import com.google.ar.sceneform.ux.ArFragment
+import com.google.ar.core.Config
+import com.google.ar.core.Frame
+import com.google.ar.core.Plane
+import com.google.ar.core.TrackingFailureReason
 import com.memoria.idedikate.ar.MemorialItemType
 import com.memoria.idedikate.ar.MemorialItems
 import com.memoria.idedikate.ar.Offset
+import io.github.sceneview.ar.ARScene
+import io.github.sceneview.ar.node.AnchorNode
+import io.github.sceneview.rememberEngine
+import io.github.sceneview.rememberMaterialLoader
+import io.github.sceneview.rememberNodes
+import io.github.sceneview.rememberOnGestureListener
+
+private val MEMORIAL_LAYOUT = listOf(
+    MemorialItemType.PLAQUE to Offset(0f, 0f, 0f, 0f),
+    MemorialItemType.FRUIT_OFFERING to Offset(-0.3f, 0f, 0.2f, 0f),
+    MemorialItemType.FOOD_OFFERING to Offset(0.3f, 0f, 0.2f, 0f),
+    MemorialItemType.CANDLE to Offset(-0.4f, 0f, 0.1f, 0f),
+    MemorialItemType.CANDLE to Offset(0.4f, 0f, 0.1f, 0f),
+    MemorialItemType.INCENSE_POT to Offset(0f, 0f, 0.25f, 0f),
+    MemorialItemType.INCENSE_STICK to Offset(0f, 0.05f, 0.25f, 0f)
+)
 
 @Composable
 fun ARScreen() {
@@ -66,10 +75,11 @@ fun ARScreen() {
     }
 
     if (hasCameraPermission) {
+        var status by remember { mutableStateOf("Move your phone slowly to find a flat surface") }
+
         Box(modifier = Modifier.fillMaxSize()) {
-            ARSceneViewCompose()
-            
-            // Simulating AR Overlay
+            ARSceneViewCompose(onStatusChange = { status = it })
+
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -77,10 +87,7 @@ fun ARScreen() {
                     .background(Color.Black.copy(alpha = 0.5f))
                     .padding(16.dp)
             ) {
-                Text(
-                    text = "Virtual Memorial (GPS Location)",
-                    color = Color.White
-                )
+                Text(text = status, color = Color.White)
             }
         }
     } else {
@@ -91,42 +98,70 @@ fun ARScreen() {
 }
 
 @Composable
-fun ARSceneViewCompose() {
-    val context = LocalContext.current
-    val activity = context as? FragmentActivity
+fun ARSceneViewCompose(onStatusChange: (String) -> Unit) {
+    val engine = rememberEngine()
+    val materialLoader = rememberMaterialLoader(engine)
+    val childNodes = rememberNodes()
+    // Only read inside callbacks, so updating it every frame doesn't recompose
+    var frame by remember { mutableStateOf<Frame?>(null) }
+    var hasPlaced by remember { mutableStateOf(false) }
+    var isTrackingPlane by remember { mutableStateOf(false) }
 
-    if (activity != null) {
-        // AndroidFragment manages the fragment's container and saved state, so it survives
-        // rotation / process death (a manually generated container id did not and crashed on restore)
-        AndroidFragment<ArFragment>(
-            modifier = Modifier.fillMaxSize(),
-            onUpdate = { fragment ->
-                var hasPlaced = false
-                fragment.setOnTapArPlaneListener { hitResult, _, _ ->
-                    if (hasPlaced) return@setOnTapArPlaneListener
-                    hasPlaced = true
+    ARScene(
+        modifier = Modifier.fillMaxSize(),
+        engine = engine,
+        materialLoader = materialLoader,
+        childNodes = childNodes,
+        planeRenderer = !hasPlaced,
+        sessionConfiguration = { session, config ->
+            config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL
+            config.lightEstimationMode = Config.LightEstimationMode.ENVIRONMENTAL_HDR
+            config.depthMode =
+                if (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) Config.DepthMode.AUTOMATIC
+                else Config.DepthMode.DISABLED
+        },
+        onSessionFailed = { exception ->
+            Log.e("ARScreen", "AR session failed", exception)
+            onStatusChange("AR isn't available on this device: ${exception.localizedMessage}")
+        },
+        onSessionUpdated = { _, updatedFrame ->
+            frame = updatedFrame
+            if (!hasPlaced && !isTrackingPlane &&
+                updatedFrame.getUpdatedTrackables(Plane::class.java).isNotEmpty()
+            ) {
+                isTrackingPlane = true
+                onStatusChange("Tap a surface to place the memorial")
+            }
+        },
+        onTrackingFailureChanged = { reason ->
+            if (!hasPlaced) {
+                onStatusChange(reason.toMessage() ?: "Move your phone slowly to find a flat surface")
+            }
+        },
+        onGestureListener = rememberOnGestureListener(
+            onSingleTapConfirmed = { motionEvent, node ->
+                if (hasPlaced || node != null) return@rememberOnGestureListener
+                val hit = frame?.hitTest(motionEvent)?.firstOrNull { hitResult ->
+                    val plane = hitResult.trackable as? Plane
+                    plane != null && plane.isPoseInPolygon(hitResult.hitPose)
+                } ?: return@rememberOnGestureListener
+                val anchor = runCatching { hit.createAnchor() }.getOrNull() ?: return@rememberOnGestureListener
 
-                    val anchor = hitResult.createAnchor()
-                    val anchorNode = AnchorNode(anchor)
-                    anchorNode.setParent(fragment.arSceneView.scene)
-
-                    val items = listOf(
-                        MemorialItemType.PLAQUE to Offset(0f, 0f, 0f, 0f),
-                        MemorialItemType.FRUIT_OFFERING to Offset(-0.3f, 0f, 0.2f, 0f),
-                        MemorialItemType.FOOD_OFFERING to Offset(0.3f, 0f, 0.2f, 0f),
-                        MemorialItemType.CANDLE to Offset(-0.4f, 0f, 0.1f, 0f),
-                        MemorialItemType.CANDLE to Offset(0.4f, 0f, 0.1f, 0f),
-                        MemorialItemType.INCENSE_POT to Offset(0f, 0f, 0.25f, 0f),
-                        MemorialItemType.INCENSE_STICK to Offset(0f, 0.05f, 0.25f, 0f)
-                    )
-
-                    MemorialItems.renderOfferings(fragment.requireContext(), anchorNode, items, null)
-                }
+                val anchorNode = AnchorNode(engine = engine, anchor = anchor)
+                MemorialItems.renderOfferings(engine, materialLoader, anchorNode, MEMORIAL_LAYOUT)
+                childNodes += anchorNode
+                hasPlaced = true
+                onStatusChange("Virtual Memorial")
             }
         )
-    } else {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("AR requires a FragmentActivity")
-        }
-    }
+    )
+}
+
+private fun TrackingFailureReason?.toMessage(): String? = when (this) {
+    null, TrackingFailureReason.NONE -> null
+    TrackingFailureReason.BAD_STATE -> "AR tracking error, please restart the AR view"
+    TrackingFailureReason.INSUFFICIENT_LIGHT -> "Too dark, try moving to a brighter area"
+    TrackingFailureReason.EXCESSIVE_MOTION -> "Moving too fast, slow down"
+    TrackingFailureReason.INSUFFICIENT_FEATURES -> "Point at a surface with more texture or detail"
+    TrackingFailureReason.CAMERA_UNAVAILABLE -> "Camera unavailable"
 }
