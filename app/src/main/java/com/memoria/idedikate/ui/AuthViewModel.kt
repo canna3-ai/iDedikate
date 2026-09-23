@@ -14,10 +14,20 @@ class AuthViewModel : ViewModel() {
     private val _isUserLoggedIn = MutableStateFlow(auth.currentUser != null)
     val isUserLoggedIn: StateFlow<Boolean> = _isUserLoggedIn.asStateFlow()
 
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+        _isUserLoggedIn.value = firebaseAuth.currentUser != null
+    }
+
     init {
-        auth.addAuthStateListener { firebaseAuth ->
-            _isUserLoggedIn.value = firebaseAuth.currentUser != null
-        }
+        auth.addAuthStateListener(authStateListener)
+    }
+
+    override fun onCleared() {
+        auth.removeAuthStateListener(authStateListener)
+        super.onCleared()
     }
 
     fun handleGoogleCredential(idToken: String) {
@@ -26,13 +36,16 @@ class AuthViewModel : ViewModel() {
             auth.signInWithCredential(credential)
                 .addOnSuccessListener {
                     _isUserLoggedIn.value = true
+                    _errorMessage.value = null
                 }
                 .addOnFailureListener {
                     // Handle failure
                     Log.e("AuthViewModel", "Google sign-in failed", it)
+                    _errorMessage.value = "Sign in failed: ${it.localizedMessage}"
                 }
         } catch (e: Exception) {
             Log.e("AuthViewModel", "Failed to handle Google credential", e)
+            _errorMessage.value = "An error occurred: ${e.localizedMessage}"
         }
     }
     
@@ -42,5 +55,13 @@ class AuthViewModel : ViewModel() {
         } catch (e: Exception) {
             Log.e("AuthViewModel", "Sign out failed", e)
         }
+    }
+
+    fun clearErrorMessage() {
+        _errorMessage.value = null
+    }
+
+    fun setErrorMessage(message: String) {
+        _errorMessage.value = message
     }
 }

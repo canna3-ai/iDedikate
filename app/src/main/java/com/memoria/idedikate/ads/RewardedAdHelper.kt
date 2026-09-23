@@ -10,6 +10,7 @@ import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 import com.google.android.gms.ads.rewarded.ServerSideVerificationOptions
+import com.google.firebase.auth.FirebaseAuth
 
 enum class RewardAdType(val adUnitId: String) {
     REWARDED_TOKENS("ca-app-pub-7728928885479787/5204992073"),
@@ -19,8 +20,11 @@ enum class RewardAdType(val adUnitId: String) {
     REWARDED_FOOD("ca-app-pub-7728928885479787/1912614324")
 }
 
-class RewardedAdHelper(private val context: Context) {
+class RewardedAdHelper(context: Context) {
+    // Application context so the helper never leaks an Activity
+    private val context = context.applicationContext
     private val loadedAds = mutableMapOf<RewardAdType, RewardedAd>()
+    private val loadingAds = mutableSetOf<RewardAdType>()
     private val tag = "RewardedAdHelper"
 
     init {
@@ -29,8 +33,8 @@ class RewardedAdHelper(private val context: Context) {
     }
 
     fun loadAd(type: RewardAdType) {
-        if (loadedAds.containsKey(type)) return // Already loaded or loading
-        
+        if (loadedAds.containsKey(type) || !loadingAds.add(type)) return // Already loaded or loading
+
         val adRequest = AdRequest.Builder().build()
         RewardedAd.load(
             context,
@@ -39,25 +43,32 @@ class RewardedAdHelper(private val context: Context) {
             object : RewardedAdLoadCallback() {
                 override fun onAdFailedToLoad(adError: LoadAdError) {
                     Log.d(tag, "Failed to load ${type.name}: " + adError.toString())
+                    loadingAds.remove(type)
                     loadedAds.remove(type)
                 }
 
                 override fun onAdLoaded(ad: RewardedAd) {
                     Log.d(tag, "Ad was loaded for ${type.name}.")
-                    
+                    loadingAds.remove(type)
+
                     // Setup Server-Side Verification options
-                    val options = ServerSideVerificationOptions.Builder()
-                        .setCustomData("USER_ID_PLACEHOLDER") // TODO: Replace with the actual logged-in User ID
-                        .build()
-                    ad.setServerSideVerificationOptions(options)
-                    
+                    FirebaseAuth.getInstance().currentUser?.uid?.let { uid ->
+                        val options = ServerSideVerificationOptions.Builder()
+                            .setUserId(uid)
+                            .setCustomData(type.name)
+                            .build()
+                        ad.setServerSideVerificationOptions(options)
+                    }
+
                     loadedAds[type] = ad
                 }
             })
     }
 
-    fun showAd(activity: Activity, type: RewardAdType, onRewarded: (Int, String) -> Unit) {
-        val rewardedAd = loadedAds[type]
+    /** Shows the ad for [type]. Returns false (and starts loading) if no ad is ready yet. */
+    fun showAd(activity: Activity, type: RewardAdType, onRewarded: (Int, String) -> Unit): Boolean {
+        // Rewarded ads are single-use; take it out now so a double tap can't show it twice
+        val rewardedAd = loadedAds.remove(type)
         if (rewardedAd != null) {
             rewardedAd.fullScreenContentCallback = object : FullScreenContentCallback() {
                 override fun onAdShowedFullScreenContent() {
@@ -65,13 +76,12 @@ class RewardedAdHelper(private val context: Context) {
                 }
 
                 override fun onAdFailedToShowFullScreenContent(e: AdError) {
-                    Log.d(tag, "Ad failed to show fullscreen content.")
-                    loadedAds.remove(type)
+                    Log.d(tag, "Ad failed to show fullscreen content: ${e.message}")
+                    loadAd(type)
                 }
 
                 override fun onAdDismissedFullScreenContent() {
                     Log.d(tag, "Ad was dismissed.")
-                    loadedAds.remove(type)
                     loadAd(type) // Pre-load the next ad
                 }
             }
@@ -82,10 +92,12 @@ class RewardedAdHelper(private val context: Context) {
                 Log.d(tag, "User earned the reward. Amount: $rewardAmount, Type: $rewardItemType")
                 onRewarded(rewardAmount, rewardItemType)
             }
+            return true
         } else {
             Log.d(tag, "The rewarded ad for ${type.name} wasn't ready yet.")
             // Try loading again just in case
             loadAd(type)
+            return false
         }
     }
 }

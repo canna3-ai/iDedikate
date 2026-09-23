@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /memorials/{memorialId} {
+      // Any signed-in user can see memorials
+      allow read: if request.auth != null;
+
+      // Users can only create pins as themselves, with a fixed, validated shape
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['latitude', 'longitude', 'message', 'ownerUid', 'createdAt'])
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.latitude is number
+        && request.resource.data.latitude >= -90 && request.resource.data.latitude <= 90
+        && request.resource.data.longitude is number
+        && request.resource.data.longitude >= -180 && request.resource.data.longitude <= 180
+        && request.resource.data.message is string
+        && request.resource.data.message.size() <= 200
+        && request.resource.data.createdAt == request.time;
+
+      // Only the owner can remove their pin; pins are immutable otherwise
+      allow delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
+      allow update: if false;
+    }
+  }
+}

@@ -14,7 +14,8 @@ fun LoginScreen(
     onGoogleSignInClick: () -> Unit,
     onFacebookSignInClick: () -> Unit,
     onAppleSignInClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    errorMessage: String? = null
 ) {
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -41,6 +42,20 @@ fun LoginScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 32.dp)
             )
+
+            if (errorMessage != null) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.padding(bottom = 24.dp).fillMaxWidth()
+                ) {
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
             
             Button(
                 onClick = onGoogleSignInClick,

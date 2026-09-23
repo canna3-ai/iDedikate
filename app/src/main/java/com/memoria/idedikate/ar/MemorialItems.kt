@@ -1,6 +1,7 @@
 package com.memoria.idedikate.ar
 
 import android.content.Context
+import android.util.Log
 import com.memoria.idedikate.ads.RewardAdType
 import com.google.ar.sceneform.Node
 import com.google.ar.sceneform.math.Quaternion
@@ -55,7 +56,8 @@ object MemorialItems {
                 node.setParent(anchorNode)
                 node.localPosition = Vector3(offset.x, offset.y, offset.z)
                 node.localRotation = Quaternion.axisAngle(Vector3(0f, 1f, 0f), offset.yaw)
-            }.exceptionally {
+            }.exceptionally { throwable ->
+                Log.e("MemorialItems", "Failed to render $type", throwable)
                 null
             }
         }

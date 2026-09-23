@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
-import androidx.fragment.app.FragmentContainerView
+import androidx.fragment.compose.AndroidFragment
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.google.ar.sceneform.AnchorNode
@@ -94,27 +94,22 @@ fun ARScreen() {
 fun ARSceneViewCompose() {
     val context = LocalContext.current
     val activity = context as? FragmentActivity
-    
+
     if (activity != null) {
-        val fragmentManager = activity.supportFragmentManager
-        val containerId = remember { View.generateViewId() }
-        
-        AndroidView(
-            factory = { ctx ->
-                val view = FragmentContainerView(ctx)
-                view.id = containerId
-                
-                val fragment = ArFragment()
-                
+        // AndroidFragment manages the fragment's container and saved state, so it survives
+        // rotation / process death (a manually generated container id did not and crashed on restore)
+        AndroidFragment<ArFragment>(
+            modifier = Modifier.fillMaxSize(),
+            onUpdate = { fragment ->
                 var hasPlaced = false
                 fragment.setOnTapArPlaneListener { hitResult, _, _ ->
                     if (hasPlaced) return@setOnTapArPlaneListener
                     hasPlaced = true
-                    
+
                     val anchor = hitResult.createAnchor()
                     val anchorNode = AnchorNode(anchor)
                     anchorNode.setParent(fragment.arSceneView.scene)
-                    
+
                     val items = listOf(
                         MemorialItemType.PLAQUE to Offset(0f, 0f, 0f, 0f),
                         MemorialItemType.FRUIT_OFFERING to Offset(-0.3f, 0f, 0.2f, 0f),
@@ -124,23 +119,10 @@ fun ARSceneViewCompose() {
                         MemorialItemType.INCENSE_POT to Offset(0f, 0f, 0.25f, 0f),
                         MemorialItemType.INCENSE_STICK to Offset(0f, 0.05f, 0.25f, 0f)
                     )
-                    
-                    MemorialItems.renderOfferings(ctx, anchorNode, items, null)
+
+                    MemorialItems.renderOfferings(fragment.requireContext(), anchorNode, items, null)
                 }
-                
-                fragmentManager.beginTransaction()
-                    .replace(containerId, fragment, "AR_FRAGMENT_$containerId")
-                    .commit()
-                
-                view
-            },
-            onRelease = {
-                val fragment = fragmentManager.findFragmentByTag("AR_FRAGMENT_$containerId")
-                if (fragment != null) {
-                    fragmentManager.beginTransaction().remove(fragment).commitAllowingStateLoss()
-                }
-            },
-            modifier = Modifier.fillMaxSize()
+            }
         )
     } else {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

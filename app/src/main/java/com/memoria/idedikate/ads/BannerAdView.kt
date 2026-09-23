@@ -21,6 +21,7 @@ fun BannerAdView(
                 this.adUnitId = adUnitId
                 loadAd(AdRequest.Builder().build())
             }
-        }
+        },
+        onRelease = { it.destroy() }
     )
 }

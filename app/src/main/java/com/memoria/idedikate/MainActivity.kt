@@ -68,6 +68,26 @@ import androidx.compose.ui.text.style.TextAlign
 import android.widget.Toast
 import com.memoria.idedikate.ui.LoginScreen
 import com.memoria.idedikate.ui.AuthViewModel
+import androidx.credentials.CredentialManager
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialException
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import android.util.Log
+import androidx.credentials.CustomCredential
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import android.content.Context
+import android.content.ContextWrapper
+import kotlin.coroutines.cancellation.CancellationException
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 @Serializable
 data object MapRoute : NavKey
@@ -101,8 +121,55 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
     
     if (!isUserLoggedIn) {
         val context = LocalContext.current
+        val coroutineScope = rememberCoroutineScope()
+        val errorMessage by authViewModel.errorMessage.collectAsState()
+        
         LoginScreen(
-            onGoogleSignInClick = { /* Handle Google Sign In in a real app */ },
+            errorMessage = errorMessage,
+            onGoogleSignInClick = {
+                authViewModel.clearErrorMessage()
+                coroutineScope.launch {
+                    try {
+                        val credentialManager = CredentialManager.create(context)
+                        
+                        val googleIdOption = GetGoogleIdOption.Builder()
+                            .setFilterByAuthorizedAccounts(false)
+                            .setServerClientId(context.getString(R.string.default_web_client_id))
+                            .build()
+                            
+                        val request = GetCredentialRequest.Builder()
+                            .addCredentialOption(googleIdOption)
+                            .build()
+
+                        val result = credentialManager.getCredential(
+                            request = request,
+                            context = context
+                        )
+                        
+                        val credential = result.credential
+                        
+                        if (credential is CustomCredential &&
+                            credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                            
+                            val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                            authViewModel.handleGoogleCredential(googleIdTokenCredential.idToken)
+                        } else {
+                            authViewModel.setErrorMessage("Unexpected type of credential")
+                        }
+                    } catch (e: GetCredentialCancellationException) {
+                        // User dismissed the account picker; not an error
+                        Log.d("Auth", "Google Sign In cancelled by user")
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: GetCredentialException) {
+                        Log.e("Auth", "GetCredentialException", e)
+                        authViewModel.setErrorMessage("Google Sign In failed: ${e.message}")
+                    } catch (e: Exception) {
+                        Log.e("Auth", "Exception", e)
+                        authViewModel.setErrorMessage("An error occurred: ${e.message}")
+                    }
+                }
+            },
             onFacebookSignInClick = { 
                 Toast.makeText(context, "Facebook Sign In coming soon", Toast.LENGTH_SHORT).show()
             },
@@ -114,12 +181,49 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
     }
 
     val backStack = rememberNavBackStack(MapRoute)
+    val context = LocalContext.current
+    val activity = context.findActivity()
+    val coroutineScope = rememberCoroutineScope()
+    var showSignOutDialog by remember { mutableStateOf(false) }
+
+    if (showSignOutDialog) {
+        AlertDialog(
+            onDismissRequest = { showSignOutDialog = false },
+            title = { Text("Sign out?") },
+            text = { Text("You can sign back in any time. Your wallet stays saved on this device.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showSignOutDialog = false
+                    coroutineScope.launch {
+                        // Clear the saved Google credential first so the account picker shows next time;
+                        // signing out removes this screen (and cancels this scope)
+                        try {
+                            CredentialManager.create(context).clearCredentialState(ClearCredentialStateRequest())
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.e("Auth", "Failed to clear credential state", e)
+                        }
+                        authViewModel.signOut()
+                    }
+                }) { Text("Sign out") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSignOutDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("iDedikate Dashboard") }
+                title = { Text("iDedikate Dashboard") },
+                actions = {
+                    IconButton(onClick = { showSignOutDialog = true }) {
+                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sign out")
+                    }
+                }
             )
         },
         bottomBar = {
@@ -176,10 +280,13 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 NavDisplay(
                     backStack = backStack,
-                    onBack = { backStack.removeLastOrNull() },
+                    onBack = {
+                        // NavDisplay crashes on an empty back stack; exit instead of popping the last tab
+                        if (backStack.size > 1) backStack.removeLastOrNull() else activity?.finish()
+                    },
                     entryProvider = { key ->
                         when (key) {
-                            is MapRoute -> NavEntry(key) { MapScreen() }
+                            is MapRoute -> NavEntry(key) { MapScreen(tokenViewModel) }
                             is ARRoute -> NavEntry(key) { ARScreen() }
                             is ListRoute -> NavEntry(key) { ListScreen() }
                             is WalletRoute -> NavEntry(key) { WalletScreen(tokenViewModel) }
@@ -293,8 +400,12 @@ fun WalletScreen(tokenViewModel: TokenViewModel) {
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
                             onClick = {
-                                adHelper.showAd(context as Activity, item.adType) { reward, _ ->
+                                val activity = context.findActivity() ?: return@Button
+                                val shown = adHelper.showAd(activity, item.adType) { reward, _ ->
                                     tokenViewModel.addItem(item.adType, reward)
+                                }
+                                if (!shown) {
+                                    Toast.makeText(context, "Ad not ready yet, please try again shortly", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -306,6 +417,12 @@ fun WalletScreen(tokenViewModel: TokenViewModel) {
             }
         }
     }
+}
+
+tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 data class InventoryItem(
