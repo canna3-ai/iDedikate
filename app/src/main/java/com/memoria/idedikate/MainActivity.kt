@@ -163,8 +163,9 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: NoCredentialException) {
-                        Log.w("Auth", "No Google account available", e)
-                        authViewModel.setErrorMessage("No Google account on this device — add one in Settings")
+                        // Also raised for OAuth misconfiguration (e.g. SHA-1 not registered); check logcat "Auth" tag
+                        Log.w("Auth", "No usable Google credential", e)
+                        authViewModel.setErrorMessage("Couldn't find a Google account to sign in with. Make sure one is added in Settings, then try again.")
                     } catch (e: GetCredentialException) {
                         Log.e("Auth", "GetCredentialException", e)
                         authViewModel.setErrorMessage("Google Sign In failed: ${e.message}")

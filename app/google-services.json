@@ -10,12 +10,49 @@
       "client_info": {
         "mobilesdk_app_id": "1:504164998595:android:ab5dc08d9351d73eec7176",
         "android_client_info": {
-          "package_name": "com.memoria.idedikate"
+          "package_name": "com.memoria.app"
         }
       },
       "oauth_client": [
         {
           "client_id": "504164998595-ren0rgf8tahgqu7segeg838qifp92u40.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.memoria.app",
+            "certificate_hash": "8ded5ddeda7aaf5a02fe2cb3e0de991cf3f0dac1"
+          }
+        },
+        {
+          "client_id": "504164998595-qppkmcjgc6gbsq0bhq4j0jo3hb6uqp6g.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBcTRj1dKyPjBx09kXN-tLQqyeowp3qMs4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "504164998595-qppkmcjgc6gbsq0bhq4j0jo3hb6uqp6g.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:504164998595:android:cd48557be6c08dd7ec7176",
+        "android_client_info": {
+          "package_name": "com.memoria.idedikate"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "504164998595-vj5v5kd08184u8bcsc3tn46l845d5hhp.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.memoria.idedikate",

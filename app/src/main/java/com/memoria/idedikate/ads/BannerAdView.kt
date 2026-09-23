@@ -7,11 +7,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
+import com.memoria.idedikate.BuildConfig
 
 @Composable
 fun BannerAdView(
     modifier: Modifier = Modifier,
-    adUnitId: String = "ca-app-pub-7728928885479787/1984855801"
+    // Debug builds use Google's sample banner unit, which always fills
+    adUnitId: String = if (BuildConfig.DEBUG) "ca-app-pub-3940256099942544/6300978111" else "ca-app-pub-7728928885479787/1984855801"
 ) {
     AndroidView(
         modifier = modifier.fillMaxWidth(),

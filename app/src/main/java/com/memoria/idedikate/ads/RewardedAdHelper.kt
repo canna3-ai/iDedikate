@@ -11,13 +11,20 @@ import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 import com.google.android.gms.ads.rewarded.ServerSideVerificationOptions
 import com.google.firebase.auth.FirebaseAuth
+import com.memoria.idedikate.BuildConfig
 
-enum class RewardAdType(val adUnitId: String) {
+// Google's sample ad units: always fill, and clicking them never risks the AdMob account
+private const val TEST_REWARDED_AD_UNIT_ID = "ca-app-pub-3940256099942544/5224354917"
+
+enum class RewardAdType(private val productionAdUnitId: String) {
     REWARDED_TOKENS("ca-app-pub-7728928885479787/5204992073"),
     REWARDED_DISPLAY("ca-app-pub-7728928885479787/6326502052"),
     REWARDED_INCENSE("ca-app-pub-7728928885479787/6763731739"),
     REWARDED_FRUITS("ca-app-pub-7728928885479787/2455539800"),
-    REWARDED_FOOD("ca-app-pub-7728928885479787/1912614324")
+    REWARDED_FOOD("ca-app-pub-7728928885479787/1912614324");
+
+    val adUnitId: String
+        get() = if (BuildConfig.DEBUG) TEST_REWARDED_AD_UNIT_ID else productionAdUnitId
 }
 
 class RewardedAdHelper(context: Context) {

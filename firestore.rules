@@ -22,9 +22,8 @@ service cloud.firestore {
           && data.sharedWith is list
           && data.sharedWith.size() <= 20
           // Only shared pins may list people; shared pins must list at least one
-          && (data.visibility == 'shared'
-                ? data.sharedWith.size() > 0
-                : data.sharedWith.size() == 0);
+          && ((data.visibility == 'shared' && data.sharedWith.size() > 0)
+              || (data.visibility != 'shared' && data.sharedWith.size() == 0));
       }
 
       // Public pins: any signed-in user. Private: owner only. Shared: owner + listed emails.

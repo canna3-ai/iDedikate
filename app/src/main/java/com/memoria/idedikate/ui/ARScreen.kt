@@ -27,6 +27,12 @@ import com.google.ar.core.Config
 import com.google.ar.core.Frame
 import com.google.ar.core.Plane
 import com.google.ar.core.TrackingFailureReason
+import com.google.ar.core.exceptions.CameraNotAvailableException
+import com.google.ar.core.exceptions.UnavailableApkTooOldException
+import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException
+import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException
+import com.google.ar.core.exceptions.UnavailableSdkTooOldException
+import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException
 import com.memoria.idedikate.ar.MemorialItemType
 import com.memoria.idedikate.ar.MemorialItems
 import com.memoria.idedikate.ar.Offset
@@ -122,7 +128,7 @@ fun ARSceneViewCompose(onStatusChange: (String) -> Unit) {
         },
         onSessionFailed = { exception ->
             Log.e("ARScreen", "AR session failed", exception)
-            onStatusChange("AR isn't available on this device: ${exception.localizedMessage}")
+            onStatusChange(exception.toArUnavailableMessage())
         },
         onSessionUpdated = { _, updatedFrame ->
             frame = updatedFrame
@@ -164,4 +170,15 @@ private fun TrackingFailureReason?.toMessage(): String? = when (this) {
     TrackingFailureReason.EXCESSIVE_MOTION -> "Moving too fast, slow down"
     TrackingFailureReason.INSUFFICIENT_FEATURES -> "Point at a surface with more texture or detail"
     TrackingFailureReason.CAMERA_UNAVAILABLE -> "Camera unavailable"
+}
+
+// ARCore's unavailability exceptions usually carry no message, so describe them by type
+private fun Exception.toArUnavailableMessage(): String = when (this) {
+    is UnavailableDeviceNotCompatibleException -> "This device doesn't support AR"
+    is UnavailableArcoreNotInstalledException,
+    is UnavailableUserDeclinedInstallationException -> "Google Play Services for AR is required. Install it from the Play Store to use AR."
+    is UnavailableApkTooOldException -> "Please update Google Play Services for AR"
+    is UnavailableSdkTooOldException -> "Please update iDedikate to use AR"
+    is CameraNotAvailableException -> "The camera is in use by another app"
+    else -> "AR couldn't start" + (localizedMessage?.let { ": $it" } ?: "")
 }
