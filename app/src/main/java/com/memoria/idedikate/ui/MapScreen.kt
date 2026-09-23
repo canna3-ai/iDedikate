@@ -41,7 +41,25 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import com.memoria.idedikate.TokenViewModel
 import com.memoria.idedikate.ads.RewardAdType
+import com.memoria.idedikate.model.MemorialItem
+import com.memoria.idedikate.model.PinVisibility
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import kotlinx.coroutines.launch
+
+private fun PinVisibility.markerHue(): Float = when (this) {
+    PinVisibility.PUBLIC -> BitmapDescriptorFactory.HUE_RED
+    PinVisibility.SHARED -> BitmapDescriptorFactory.HUE_GREEN
+    PinVisibility.PRIVATE -> BitmapDescriptorFactory.HUE_VIOLET
+}
+
+private fun MemorialItem.markerSnippet(isOwn: Boolean): String? = when {
+    isOwn -> when (visibility) {
+        PinVisibility.SHARED -> "Shared with ${sharedWith.size} · tap to edit"
+        else -> "${visibility.label} · tap to edit"
+    }
+    visibility == PinVisibility.SHARED -> "Shared with you"
+    else -> null
+}
 
 private fun Context.hasLocationPermission(): Boolean =
     ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -122,6 +140,57 @@ fun MapScreen(tokenViewModel: TokenViewModel, mapViewModel: MapViewModel = viewM
     val mapProperties = MapProperties(isMyLocationEnabled = hasLocationPermission)
     val mapUiSettings = MapUiSettings(myLocationButtonEnabled = true)
 
+    // Long-pressed location awaiting a visibility choice, and the own pin being edited
+    var pendingPin by remember { mutableStateOf<LatLng?>(null) }
+    var editingPin by remember { mutableStateOf<MemorialItem?>(null) }
+
+    pendingPin?.let { latLng ->
+        PinVisibilityDialog(
+            title = "Drop a memorial",
+            confirmLabel = "Drop pin (1 token)",
+            ownEmail = mapViewModel.currentEmail,
+            onDismiss = { pendingPin = null },
+            onConfirm = { visibility, sharedWith ->
+                pendingPin = null
+                coroutineScope.launch {
+                    if (tokenViewModel.spendTokens(1)) {
+                        mapViewModel.dropPin(latLng, "In Loving Memory", visibility, sharedWith) { e ->
+                            // Refund the token if the server rejected the pin
+                            tokenViewModel.addItem(RewardAdType.REWARDED_TOKENS, 1)
+                            Toast.makeText(context, "Couldn't save memorial: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                        }
+                        Toast.makeText(context, "Memorial pin dropped!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Not enough tokens!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
+    }
+
+    editingPin?.let { pin ->
+        PinVisibilityDialog(
+            title = "Edit memorial",
+            confirmLabel = "Save",
+            ownEmail = mapViewModel.currentEmail,
+            initialVisibility = pin.visibility,
+            initialSharedWith = pin.sharedWith,
+            onDismiss = { editingPin = null },
+            onConfirm = { visibility, sharedWith ->
+                editingPin = null
+                mapViewModel.updateVisibility(pin.id, visibility, sharedWith) { e ->
+                    Toast.makeText(context, "Couldn't update memorial: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                }
+            },
+            onDelete = {
+                editingPin = null
+                mapViewModel.deletePin(pin.id) { e ->
+                    Toast.makeText(context, "Couldn't delete memorial: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                }
+            }
+        )
+    }
+
     // Outer Scaffold (MainActivity) already handles system insets, so no nested Scaffold here
     Column(modifier = Modifier.fillMaxSize()) {
         Text(
@@ -144,27 +213,25 @@ fun MapScreen(tokenViewModel: TokenViewModel, mapViewModel: MapViewModel = viewM
                     cameraPositionState.projection?.visibleRegion?.latLngBounds?.let(mapViewModel::setVisibleBounds)
                 },
                 onMapLongClick = { latLng ->
-                    coroutineScope.launch {
-                        if (tokenViewModel.spendTokens(1)) {
-                            mapViewModel.dropPin(latLng, "In Loving Memory") { e ->
-                                // Refund the token if the server rejected the pin
-                                tokenViewModel.addItem(RewardAdType.REWARDED_TOKENS, 1)
-                                Toast.makeText(context, "Couldn't save memorial: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-                            }
-                            Toast.makeText(context, "Memorial pin dropped!", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "Not enough tokens!", Toast.LENGTH_SHORT).show()
-                        }
+                    // Final check happens atomically when the pin is confirmed
+                    if (tokens > 0) {
+                        pendingPin = latLng
+                    } else {
+                        Toast.makeText(context, "Not enough tokens!", Toast.LENGTH_SHORT).show()
                     }
                 }
             ) {
+                val currentUid = mapViewModel.currentUid
                 memorials.forEach { memorial ->
                     key(memorial.id) {
+                        val isOwn = memorial.ownerUid == currentUid
                         val markerState = rememberMarkerState(position = LatLng(memorial.latitude, memorial.longitude))
                         Marker(
                             state = markerState,
-                            title = "Memorial",
-                            snippet = memorial.message
+                            title = memorial.message,
+                            snippet = memorial.markerSnippet(isOwn),
+                            icon = BitmapDescriptorFactory.defaultMarker(memorial.visibility.markerHue()),
+                            onInfoWindowClick = { if (isOwn) editingPin = memorial }
                         )
                     }
                 }

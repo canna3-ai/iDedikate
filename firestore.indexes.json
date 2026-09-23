@@ -1,0 +1,29 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "memorials",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "visibility", "order": "ASCENDING" },
+        { "fieldPath": "latitude", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "memorials",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerUid", "order": "ASCENDING" },
+        { "fieldPath": "latitude", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "memorials",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sharedWith", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "latitude", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

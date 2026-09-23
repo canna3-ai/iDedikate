@@ -2,12 +2,39 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /memorials/{memorialId} {
-      // Any signed-in user can see memorials
-      allow read: if request.auth != null;
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      function isOwner() {
+        return resource.data.ownerUid == request.auth.uid;
+      }
+
+      function isSharedWithMe() {
+        return request.auth.token.email != null
+          && request.auth.token.email_verified == true
+          && request.auth.token.email.lower() in resource.data.sharedWith;
+      }
+
+      // Visibility rules shared by create and update
+      function validVisibility(data) {
+        return data.visibility in ['private', 'shared', 'public']
+          && data.sharedWith is list
+          && data.sharedWith.size() <= 20
+          // Only shared pins may list people; shared pins must list at least one
+          && (data.visibility == 'shared'
+                ? data.sharedWith.size() > 0
+                : data.sharedWith.size() == 0);
+      }
+
+      // Public pins: any signed-in user. Private: owner only. Shared: owner + listed emails.
+      allow read: if isSignedIn()
+        && (resource.data.visibility == 'public' || isOwner() || isSharedWithMe());
 
       // Users can only create pins as themselves, with a fixed, validated shape
-      allow create: if request.auth != null
-        && request.resource.data.keys().hasOnly(['latitude', 'longitude', 'message', 'ownerUid', 'createdAt'])
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(
+             ['latitude', 'longitude', 'message', 'ownerUid', 'visibility', 'sharedWith', 'createdAt'])
         && request.resource.data.ownerUid == request.auth.uid
         && request.resource.data.latitude is number
         && request.resource.data.latitude >= -90 && request.resource.data.latitude <= 90
@@ -15,11 +42,15 @@ service cloud.firestore {
         && request.resource.data.longitude >= -180 && request.resource.data.longitude <= 180
         && request.resource.data.message is string
         && request.resource.data.message.size() <= 200
-        && request.resource.data.createdAt == request.time;
+        && request.resource.data.createdAt == request.time
+        && validVisibility(request.resource.data);
 
-      // Only the owner can remove their pin; pins are immutable otherwise
-      allow delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
-      allow update: if false;
+      // Owners may change who can see a pin, nothing else
+      allow update: if isSignedIn() && isOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['visibility', 'sharedWith'])
+        && validVisibility(request.resource.data);
+
+      allow delete: if isSignedIn() && isOwner();
     }
   }
 }
