@@ -68,6 +68,8 @@ import androidx.compose.ui.text.style.TextAlign
 import android.widget.Toast
 import com.memoria.idedikate.ui.LoginScreen
 import com.memoria.idedikate.ui.AuthViewModel
+import com.memoria.idedikate.model.ArMemorial
+import com.memoria.idedikate.model.toArMemorial
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
@@ -94,7 +96,8 @@ import androidx.compose.runtime.setValue
 data object MapRoute : NavKey
 
 @Serializable
-data object ARRoute : NavKey
+/** [memorial] is the memorial chosen on the map; null when opened from the tab bar. */
+data class ARRoute(val memorial: ArMemorial? = null) : NavKey
 
 @Serializable
 data object ListRoute : NavKey
@@ -250,7 +253,7 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                     onClick = {
                         if (currentRoute !is ARRoute) {
                             backStack.clear()
-                            backStack.add(ARRoute)
+                            backStack.add(ARRoute())
                         }
                     },
                     icon = { Icon(Icons.Default.CameraAlt, contentDescription = "AR") },
@@ -291,8 +294,16 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                     },
                     entryProvider = { key ->
                         when (key) {
-                            is MapRoute -> NavEntry(key) { MapScreen(tokenViewModel) }
-                            is ARRoute -> NavEntry(key) { ARScreen() }
+                            is MapRoute -> NavEntry(key) {
+                                MapScreen(
+                                    tokenViewModel = tokenViewModel,
+                                    onViewInAr = { memorial ->
+                                        backStack.clear()
+                                        backStack.add(ARRoute(memorial.toArMemorial()))
+                                    }
+                                )
+                            }
+                            is ARRoute -> NavEntry(key) { ARScreen(key.memorial) }
                             is ListRoute -> NavEntry(key) { ListScreen() }
                             is WalletRoute -> NavEntry(key) { WalletScreen(tokenViewModel) }
                             else -> error("Unknown route: $key")

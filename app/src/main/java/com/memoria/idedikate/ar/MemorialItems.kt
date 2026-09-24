@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.Color
 import com.google.android.filament.Engine
 import com.google.android.filament.Texture
 import com.memoria.idedikate.ads.RewardAdType
+import com.memoria.idedikate.model.MemorialOfferings
 import io.github.sceneview.loaders.MaterialLoader
 import io.github.sceneview.math.Position
 import io.github.sceneview.math.Rotation
@@ -13,6 +14,10 @@ import io.github.sceneview.node.CubeNode
 import io.github.sceneview.node.CylinderNode
 import io.github.sceneview.node.Node
 import io.github.sceneview.node.SphereNode
+import kotlin.math.ceil
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 enum class MemorialItemType(val rewardAdType: RewardAdType) {
     PLAQUE(RewardAdType.REWARDED_DISPLAY),
@@ -40,6 +45,59 @@ data class Offset(
  * Material instances are owned by [MaterialLoader] and released when it is destroyed.
  */
 object MemorialItems {
+
+    private const val PLAQUE_SPACING = 0.26f
+    private const val PLATE_SPACING = 0.18f
+    private const val POT_Z = 0.25f
+    private const val POT_INNER_RADIUS = 0.035f
+
+    /**
+     * Arranges a memorial's offerings around its anchor: plaques in a row at the back flanked by
+     * two candles, incense sticks in a pot at the front, fruit plates to the left and food bowls
+     * to the right (each in a compact grid, so large quantities stay close together).
+     */
+    fun layoutFor(offerings: MemorialOfferings): List<Pair<MemorialItemType, Offset>> = buildList {
+        val plaqueCount = offerings.plaques
+        repeat(plaqueCount) { i ->
+            add(MemorialItemType.PLAQUE to Offset((i - (plaqueCount - 1) / 2f) * PLAQUE_SPACING, 0f, 0f, 0f))
+        }
+
+        // Candles are decoration, not wallet items, so every memorial gets a pair
+        val candleX = (plaqueCount - 1).coerceAtLeast(0) / 2f * PLAQUE_SPACING + 0.2f
+        add(MemorialItemType.CANDLE to Offset(-candleX, 0f, 0.1f, 0f))
+        add(MemorialItemType.CANDLE to Offset(candleX, 0f, 0.1f, 0f))
+
+        val sticks = offerings.incenseSticks
+        if (sticks > 0) {
+            add(MemorialItemType.INCENSE_POT to Offset(0f, 0f, POT_Z, 0f))
+            // Sunflower spiral spreads any number of sticks evenly across the pot opening
+            repeat(sticks) { i ->
+                val radius = POT_INNER_RADIUS * sqrt((i + 0.5f) / sticks)
+                val angle = i * GOLDEN_ANGLE
+                add(MemorialItemType.INCENSE_STICK to Offset(radius * cos(angle), 0.05f, POT_Z + radius * sin(angle), 0f))
+            }
+        }
+
+        addGrid(MemorialItemType.FRUIT_OFFERING, offerings.fruit, xStart = -0.3f, xDirection = -1f)
+        addGrid(MemorialItemType.FOOD_OFFERING, offerings.food, xStart = 0.3f, xDirection = 1f)
+    }
+
+    private fun MutableList<Pair<MemorialItemType, Offset>>.addGrid(
+        type: MemorialItemType,
+        count: Int,
+        xStart: Float,
+        xDirection: Float
+    ) {
+        if (count <= 0) return
+        val columns = ceil(sqrt(count.toFloat())).toInt()
+        repeat(count) { i ->
+            val column = i % columns
+            val row = i / columns
+            add(type to Offset(xStart + xDirection * column * PLATE_SPACING, 0f, 0.2f + row * PLATE_SPACING, 0f))
+        }
+    }
+
+    private const val GOLDEN_ANGLE = 2.3999631f // radians
 
     fun renderOfferings(
         engine: Engine,

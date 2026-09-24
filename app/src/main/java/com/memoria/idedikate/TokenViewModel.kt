@@ -10,6 +10,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
 import com.memoria.idedikate.ads.RewardAdType
+import com.memoria.idedikate.model.MemorialOfferings
+import com.memoria.idedikate.model.OfferingType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +39,12 @@ class TokenViewModel(application: Application) : AndroidViewModel(application) {
     val fruitOfferings: StateFlow<Int> = balance(RewardAdType.REWARDED_FRUITS)
     val foodOfferings: StateFlow<Int> = balance(RewardAdType.REWARDED_FOOD)
 
+    /** Offerings the user owns and can place at a memorial. */
+    val offeringStock: StateFlow<MemorialOfferings> =
+        combine(plaques, incenseSticks, fruitOfferings, foodOfferings) { plaques, incense, fruit, food ->
+            MemorialOfferings(plaques = plaques, incenseSticks = incense, fruit = fruit, food = food)
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, MemorialOfferings())
+
     fun addTokens(amount: Int) = addItem(RewardAdType.REWARDED_TOKENS, amount)
 
     /** Deducts [amount] tokens if the balance allows it. Returns true on success. */
@@ -52,6 +60,39 @@ class TokenViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         return spent
+    }
+
+    /**
+     * Deducts [tokens] plus every offering in [offerings] in a single edit, so nothing is spent
+     * unless the user can afford all of it. Returns true on success.
+     */
+    suspend fun spendForMemorial(tokens: Int, offerings: MemorialOfferings): Boolean {
+        val cost = buildMap {
+            put(RewardAdType.REWARDED_TOKENS, tokens)
+            OfferingType.entries.forEach { type -> merge(type.rewardAdType, offerings[type], Int::plus) }
+        }.filterValues { it > 0 }
+
+        var spent = false
+        dataStore.edit { prefs ->
+            val currentUid = uid.value
+            val affordable = cost.all { (type, amount) -> prefs.balanceOf(key(currentUid, type), type) >= amount }
+            if (affordable) {
+                cost.forEach { (type, amount) ->
+                    val key = key(currentUid, type)
+                    prefs[key] = prefs.balanceOf(key, type) - amount
+                }
+                spent = true
+            }
+        }
+        return spent
+    }
+
+    /** Returns what [spendForMemorial] took, e.g. when the server rejects the memorial. */
+    fun refundMemorial(tokens: Int, offerings: MemorialOfferings) {
+        if (tokens > 0) addItem(RewardAdType.REWARDED_TOKENS, tokens)
+        OfferingType.entries.forEach { type ->
+            offerings[type].takeIf { it > 0 }?.let { addItem(type.rewardAdType, it) }
+        }
     }
 
     fun addItem(type: RewardAdType, amount: Int) {

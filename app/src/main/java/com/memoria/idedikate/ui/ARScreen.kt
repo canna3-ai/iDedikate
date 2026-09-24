@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.google.ar.core.Config
@@ -33,9 +34,8 @@ import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException
 import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException
 import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException
-import com.memoria.idedikate.ar.MemorialItemType
 import com.memoria.idedikate.ar.MemorialItems
-import com.memoria.idedikate.ar.Offset
+import com.memoria.idedikate.model.ArMemorial
 import io.github.sceneview.ar.ARScene
 import io.github.sceneview.ar.node.AnchorNode
 import io.github.sceneview.rememberEngine
@@ -43,18 +43,19 @@ import io.github.sceneview.rememberMaterialLoader
 import io.github.sceneview.rememberNodes
 import io.github.sceneview.rememberOnGestureListener
 
-private val MEMORIAL_LAYOUT = listOf(
-    MemorialItemType.PLAQUE to Offset(0f, 0f, 0f, 0f),
-    MemorialItemType.FRUIT_OFFERING to Offset(-0.3f, 0f, 0.2f, 0f),
-    MemorialItemType.FOOD_OFFERING to Offset(0.3f, 0f, 0.2f, 0f),
-    MemorialItemType.CANDLE to Offset(-0.4f, 0f, 0.1f, 0f),
-    MemorialItemType.CANDLE to Offset(0.4f, 0f, 0.1f, 0f),
-    MemorialItemType.INCENSE_POT to Offset(0f, 0f, 0.25f, 0f),
-    MemorialItemType.INCENSE_STICK to Offset(0f, 0.05f, 0.25f, 0f)
-)
-
 @Composable
-fun ARScreen() {
+fun ARScreen(memorial: ArMemorial?) {
+    if (memorial == null) {
+        // Opened from the tab bar: there's nothing to place until a memorial is chosen on the map
+        Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+            Text(
+                "Choose a memorial on the Map, then tap \"View in AR\" to place it here.",
+                textAlign = TextAlign.Center
+            )
+        }
+        return
+    }
+
     val context = LocalContext.current
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -84,7 +85,7 @@ fun ARScreen() {
         var status by remember { mutableStateOf("Move your phone slowly to find a flat surface") }
 
         Box(modifier = Modifier.fillMaxSize()) {
-            ARSceneViewCompose(onStatusChange = { status = it })
+            ARSceneViewCompose(memorial = memorial, onStatusChange = { status = it })
 
             Box(
                 modifier = Modifier
@@ -104,7 +105,8 @@ fun ARScreen() {
 }
 
 @Composable
-fun ARSceneViewCompose(onStatusChange: (String) -> Unit) {
+fun ARSceneViewCompose(memorial: ArMemorial, onStatusChange: (String) -> Unit) {
+    val layout = remember(memorial) { MemorialItems.layoutFor(memorial.offerings) }
     val engine = rememberEngine()
     val materialLoader = rememberMaterialLoader(engine)
     val childNodes = rememberNodes()
@@ -136,7 +138,7 @@ fun ARSceneViewCompose(onStatusChange: (String) -> Unit) {
                 updatedFrame.getUpdatedTrackables(Plane::class.java).isNotEmpty()
             ) {
                 isTrackingPlane = true
-                onStatusChange("Tap a surface to place the memorial")
+                onStatusChange("Tap a surface to place \"${memorial.title}\"")
             }
         },
         onTrackingFailureChanged = { reason ->
@@ -154,10 +156,10 @@ fun ARSceneViewCompose(onStatusChange: (String) -> Unit) {
                 val anchor = runCatching { hit.createAnchor() }.getOrNull() ?: return@rememberOnGestureListener
 
                 val anchorNode = AnchorNode(engine = engine, anchor = anchor)
-                MemorialItems.renderOfferings(engine, materialLoader, anchorNode, MEMORIAL_LAYOUT)
+                MemorialItems.renderOfferings(engine, materialLoader, anchorNode, layout)
                 childNodes += anchorNode
                 hasPlaced = true
-                onStatusChange("Virtual Memorial")
+                onStatusChange("${memorial.title} · ${memorial.offerings.summary()}")
             }
         )
     )

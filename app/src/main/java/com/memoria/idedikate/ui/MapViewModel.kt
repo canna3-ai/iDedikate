@@ -11,6 +11,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.memoria.idedikate.model.MemorialItem
+import com.memoria.idedikate.model.MemorialOfferings
 import com.memoria.idedikate.model.PinVisibility
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -63,12 +64,13 @@ class MapViewModel : ViewModel() {
         }
     }
 
-    /** Writes a new pin. The listener shows it immediately; [onFailure] fires if the server rejects it. */
+    /** Writes a new memorial with its [offerings]. The listener shows it immediately; [onFailure] fires if the server rejects it. */
     fun dropPin(
         latLng: LatLng,
         message: String,
         visibility: PinVisibility,
         sharedWith: List<String>,
+        offerings: MemorialOfferings,
         onFailure: (Exception) -> Unit
     ) {
         val uid = currentUid
@@ -85,6 +87,7 @@ class MapViewModel : ViewModel() {
                     FIELD_OWNER_UID to uid,
                     FIELD_VISIBILITY to visibility.firestoreValue,
                     FIELD_SHARED_WITH to normalizeSharedWith(visibility, sharedWith),
+                    FIELD_OFFERINGS to offerings.toFirestore(),
                     FIELD_CREATED_AT to FieldValue.serverTimestamp()
                 )
             )
@@ -185,7 +188,8 @@ class MapViewModel : ViewModel() {
             message = getString(FIELD_MESSAGE).orEmpty(),
             ownerUid = getString(FIELD_OWNER_UID).orEmpty(),
             visibility = PinVisibility.fromFirestore(getString(FIELD_VISIBILITY)),
-            sharedWith = (get(FIELD_SHARED_WITH) as? List<String>).orEmpty()
+            sharedWith = (get(FIELD_SHARED_WITH) as? List<String>).orEmpty(),
+            offerings = MemorialOfferings.fromFirestore(get(FIELD_OFFERINGS) as? Map<*, *>)
         )
     }
 
@@ -206,6 +210,7 @@ class MapViewModel : ViewModel() {
         const val FIELD_VISIBILITY = "visibility"
         const val FIELD_SHARED_WITH = "sharedWith"
         const val FIELD_CREATED_AT = "createdAt"
+        const val FIELD_OFFERINGS = "offerings"
         const val SOURCE_PUBLIC = "public"
         const val SOURCE_OWN = "own"
         const val SOURCE_SHARED = "shared"

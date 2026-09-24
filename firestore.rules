@@ -26,6 +26,17 @@ service cloud.firestore {
               || (data.visibility != 'shared' && data.sharedWith.size() == 0));
       }
 
+      // Offerings placed at the memorial: exactly these four counts, each 0-99
+      function validOfferings(o) {
+        return o is map
+          && o.keys().hasAll(['plaques', 'incenseSticks', 'fruit', 'food'])
+          && o.keys().hasOnly(['plaques', 'incenseSticks', 'fruit', 'food'])
+          && o.plaques is int && o.plaques >= 0 && o.plaques <= 99
+          && o.incenseSticks is int && o.incenseSticks >= 0 && o.incenseSticks <= 99
+          && o.fruit is int && o.fruit >= 0 && o.fruit <= 99
+          && o.food is int && o.food >= 0 && o.food <= 99;
+      }
+
       // Public pins: any signed-in user. Private: owner only. Shared: owner + listed emails.
       allow read: if isSignedIn()
         && (resource.data.visibility == 'public' || isOwner() || isSharedWithMe());
@@ -33,7 +44,7 @@ service cloud.firestore {
       // Users can only create pins as themselves, with a fixed, validated shape
       allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly(
-             ['latitude', 'longitude', 'message', 'ownerUid', 'visibility', 'sharedWith', 'createdAt'])
+             ['latitude', 'longitude', 'message', 'ownerUid', 'visibility', 'sharedWith', 'offerings', 'createdAt'])
         && request.resource.data.ownerUid == request.auth.uid
         && request.resource.data.latitude is number
         && request.resource.data.latitude >= -90 && request.resource.data.latitude <= 90
@@ -42,7 +53,8 @@ service cloud.firestore {
         && request.resource.data.message is string
         && request.resource.data.message.size() <= 200
         && request.resource.data.createdAt == request.time
-        && validVisibility(request.resource.data);
+        && validVisibility(request.resource.data)
+        && validOfferings(request.resource.data.offerings);
 
       // Owners may change who can see a pin, nothing else
       allow update: if isSignedIn() && isOwner()

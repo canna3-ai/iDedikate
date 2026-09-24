@@ -13,6 +13,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddLocationAlt
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,7 +30,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -40,7 +48,6 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import com.memoria.idedikate.TokenViewModel
-import com.memoria.idedikate.ads.RewardAdType
 import com.memoria.idedikate.model.MemorialItem
 import com.memoria.idedikate.model.PinVisibility
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
@@ -52,13 +59,15 @@ private fun PinVisibility.markerHue(): Float = when (this) {
     PinVisibility.PRIVATE -> BitmapDescriptorFactory.HUE_VIOLET
 }
 
-private fun MemorialItem.markerSnippet(isOwn: Boolean): String? = when {
+private const val MEMORIAL_TOKEN_COST = 1
+
+private fun MemorialItem.markerSnippet(isOwn: Boolean): String = when {
     isOwn -> when (visibility) {
-        PinVisibility.SHARED -> "Shared with ${sharedWith.size} · tap to edit"
-        else -> "${visibility.label} · tap to edit"
+        PinVisibility.SHARED -> "Shared with ${sharedWith.size} · tap for options"
+        else -> "${visibility.label} · tap for options"
     }
-    visibility == PinVisibility.SHARED -> "Shared with you"
-    else -> null
+    visibility == PinVisibility.SHARED -> "Shared with you · tap to view in AR"
+    else -> "${offerings.summary()} · tap to view in AR"
 }
 
 private fun Context.hasLocationPermission(): Boolean =
@@ -67,7 +76,11 @@ private fun Context.hasLocationPermission(): Boolean =
 
 @SuppressLint("MissingPermission")
 @Composable
-fun MapScreen(tokenViewModel: TokenViewModel, mapViewModel: MapViewModel = viewModel()) {
+fun MapScreen(
+    tokenViewModel: TokenViewModel,
+    onViewInAr: (MemorialItem) -> Unit,
+    mapViewModel: MapViewModel = viewModel()
+) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
@@ -140,28 +153,39 @@ fun MapScreen(tokenViewModel: TokenViewModel, mapViewModel: MapViewModel = viewM
     val mapProperties = MapProperties(isMyLocationEnabled = hasLocationPermission)
     val mapUiSettings = MapUiSettings(myLocationButtonEnabled = true)
 
-    // Long-pressed location awaiting a visibility choice, and the own pin being edited
+    // Location chosen for a new memorial, and the own memorial being managed
     var pendingPin by remember { mutableStateOf<LatLng?>(null) }
     var editingPin by remember { mutableStateOf<MemorialItem?>(null) }
+    val offeringStock by tokenViewModel.offeringStock.collectAsState()
+
+    val startPlacing: (LatLng) -> Unit = { latLng ->
+        // Final check happens atomically when the memorial is confirmed
+        if (tokens >= MEMORIAL_TOKEN_COST) {
+            pendingPin = latLng
+        } else {
+            Toast.makeText(context, "You need $MEMORIAL_TOKEN_COST token to place a memorial. Earn more in the Wallet.", Toast.LENGTH_LONG).show()
+        }
+    }
 
     pendingPin?.let { latLng ->
-        PinVisibilityDialog(
-            title = "Drop a memorial",
-            confirmLabel = "Drop pin (1 token)",
+        MemorialDialog(
+            title = "Place a memorial",
+            confirmLabel = "Place ($MEMORIAL_TOKEN_COST token)",
             ownEmail = mapViewModel.currentEmail,
+            offeringStock = offeringStock,
             onDismiss = { pendingPin = null },
-            onConfirm = { visibility, sharedWith ->
+            onConfirm = { visibility, sharedWith, offerings ->
                 pendingPin = null
                 coroutineScope.launch {
-                    if (tokenViewModel.spendTokens(1)) {
-                        mapViewModel.dropPin(latLng, "In Loving Memory", visibility, sharedWith) { e ->
-                            // Refund the token if the server rejected the pin
-                            tokenViewModel.addItem(RewardAdType.REWARDED_TOKENS, 1)
+                    if (tokenViewModel.spendForMemorial(MEMORIAL_TOKEN_COST, offerings)) {
+                        mapViewModel.dropPin(latLng, "In Loving Memory", visibility, sharedWith, offerings) { e ->
+                            // Give everything back if the server rejected the memorial
+                            tokenViewModel.refundMemorial(MEMORIAL_TOKEN_COST, offerings)
                             Toast.makeText(context, "Couldn't save memorial: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                         }
-                        Toast.makeText(context, "Memorial pin dropped!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Memorial placed!", Toast.LENGTH_SHORT).show()
                     } else {
-                        Toast.makeText(context, "Not enough tokens!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Not enough tokens or offerings", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -169,18 +193,23 @@ fun MapScreen(tokenViewModel: TokenViewModel, mapViewModel: MapViewModel = viewM
     }
 
     editingPin?.let { pin ->
-        PinVisibilityDialog(
-            title = "Edit memorial",
+        MemorialDialog(
+            title = "Your memorial",
             confirmLabel = "Save",
             ownEmail = mapViewModel.currentEmail,
             initialVisibility = pin.visibility,
             initialSharedWith = pin.sharedWith,
+            placedOfferings = pin.offerings,
             onDismiss = { editingPin = null },
-            onConfirm = { visibility, sharedWith ->
+            onConfirm = { visibility, sharedWith, _ ->
                 editingPin = null
                 mapViewModel.updateVisibility(pin.id, visibility, sharedWith) { e ->
                     Toast.makeText(context, "Couldn't update memorial: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                 }
+            },
+            onViewInAr = {
+                editingPin = null
+                onViewInAr(pin)
             },
             onDelete = {
                 editingPin = null
@@ -212,14 +241,7 @@ fun MapScreen(tokenViewModel: TokenViewModel, mapViewModel: MapViewModel = viewM
                     // Initial load, in case the camera never moves (e.g. no location permission)
                     cameraPositionState.projection?.visibleRegion?.latLngBounds?.let(mapViewModel::setVisibleBounds)
                 },
-                onMapLongClick = { latLng ->
-                    // Final check happens atomically when the pin is confirmed
-                    if (tokens > 0) {
-                        pendingPin = latLng
-                    } else {
-                        Toast.makeText(context, "Not enough tokens!", Toast.LENGTH_SHORT).show()
-                    }
-                }
+                onMapLongClick = startPlacing
             ) {
                 val currentUid = mapViewModel.currentUid
                 memorials.forEach { memorial ->
@@ -231,11 +253,31 @@ fun MapScreen(tokenViewModel: TokenViewModel, mapViewModel: MapViewModel = viewM
                             title = memorial.message,
                             snippet = memorial.markerSnippet(isOwn),
                             icon = BitmapDescriptorFactory.defaultMarker(memorial.visibility.markerHue()),
-                            onInfoWindowClick = { if (isOwn) editingPin = memorial }
+                            // Own memorials open the manage dialog; others go straight to AR
+                            onInfoWindowClick = { if (isOwn) editingPin = memorial else onViewInAr(memorial) }
                         )
                     }
                 }
             }
+
+            // Crosshair marking where "Place memorial" will put it
+            Icon(
+                Icons.Default.Add,
+                contentDescription = null,
+                tint = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(36.dp)
+            )
+
+            ExtendedFloatingActionButton(
+                onClick = { startPlacing(cameraPositionState.position.target) },
+                icon = { Icon(Icons.Default.AddLocationAlt, contentDescription = null) },
+                text = { Text("Place memorial") },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 24.dp)
+            )
         }
     }
 }

@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -16,11 +18,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -36,7 +41,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.memoria.idedikate.model.MemorialOfferings
+import com.memoria.idedikate.model.OfferingType
 import com.memoria.idedikate.model.PinVisibility
 
 private const val MAX_SHARED_EMAILS = 20
@@ -48,20 +56,26 @@ private fun PinVisibility.description(): String = when (this) {
 }
 
 /**
- * Picks who can see a pin. Used both when dropping a new pin and when the owner edits one
- * (pass [onDelete] to show the delete action).
+ * Placing a new memorial (choose offerings and who can see it) or managing an existing one
+ * (change visibility, view in AR, delete).
  */
 @Composable
-fun PinVisibilityDialog(
+fun MemorialDialog(
     title: String,
     confirmLabel: String,
     ownEmail: String?,
-    onConfirm: (PinVisibility, List<String>) -> Unit,
+    onConfirm: (PinVisibility, List<String>, MemorialOfferings) -> Unit,
     onDismiss: () -> Unit,
     initialVisibility: PinVisibility = PinVisibility.PUBLIC,
     initialSharedWith: List<String> = emptyList(),
+    /** New memorial: the user picks offerings, up to what they own. */
+    offeringStock: MemorialOfferings? = null,
+    /** Existing memorial: its offerings, shown read-only (they can't be changed once placed). */
+    placedOfferings: MemorialOfferings? = null,
+    onViewInAr: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null
 ) {
+    var offerings by remember { mutableStateOf(MemorialOfferings()) }
     var visibility by remember { mutableStateOf(initialVisibility) }
     val sharedWith = remember { mutableStateListOf<String>().apply { addAll(initialSharedWith) } }
     var emailInput by remember { mutableStateOf("") }
@@ -90,6 +104,35 @@ fun PinVisibilityDialog(
         title = { Text(title) },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                if (onViewInAr != null) {
+                    OutlinedButton(onClick = onViewInAr, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.ViewInAr, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("View in AR")
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                placedOfferings?.let {
+                    SectionTitle("Offerings")
+                    Text(it.summary(), style = MaterialTheme.typography.bodyMedium)
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                offeringStock?.let { stock ->
+                    SectionTitle("Offerings")
+                    OfferingType.entries.forEach { type ->
+                        OfferingStepper(
+                            type = type,
+                            quantity = offerings[type],
+                            owned = stock[type],
+                            onQuantityChange = { offerings = offerings.with(type, it) }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                SectionTitle("Who can see it")
                 Column(modifier = Modifier.selectableGroup()) {
                     PinVisibility.entries.forEach { option ->
                         Row(
@@ -155,7 +198,7 @@ fun PinVisibilityDialog(
                 onClick = {
                     // Include an email that was typed but not yet added
                     if (visibility == PinVisibility.SHARED && !addEmail()) return@TextButton
-                    onConfirm(visibility, if (visibility == PinVisibility.SHARED) sharedWith.toList() else emptyList())
+                    onConfirm(visibility, if (visibility == PinVisibility.SHARED) sharedWith.toList() else emptyList(), offerings)
                 }
             ) { Text(confirmLabel) }
         },
@@ -171,4 +214,36 @@ fun PinVisibilityDialog(
             }
         }
     )
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(text, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 4.dp))
+}
+
+@Composable
+private fun OfferingStepper(type: OfferingType, quantity: Int, owned: Int, onQuantityChange: (Int) -> Unit) {
+    val max = minOf(owned, MemorialOfferings.MAX_PER_ITEM)
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(type.label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "You have $owned",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        IconButton(onClick = { onQuantityChange(quantity - 1) }, enabled = quantity > 0) {
+            Icon(Icons.Default.Remove, contentDescription = "Fewer ${type.label}")
+        }
+        Text(
+            "$quantity",
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(min = 24.dp)
+        )
+        IconButton(onClick = { onQuantityChange(quantity + 1) }, enabled = quantity < max) {
+            Icon(Icons.Default.Add, contentDescription = "More ${type.label}")
+        }
+    }
 }
