@@ -25,10 +25,8 @@ enum class MemorialItemType(val rewardAdType: RewardAdType) {
     INCENSE_POT(RewardAdType.REWARDED_INCENSE),
     INCENSE_BOX(RewardAdType.REWARDED_INCENSE),
     INCENSE_PAPER(RewardAdType.REWARDED_INCENSE),
-    FRUIT_OFFERING(RewardAdType.REWARDED_FRUITS),
-    FOOD_OFFERING(RewardAdType.REWARDED_FOOD),
-    CANDLE(RewardAdType.REWARDED_DISPLAY),
-    FLOWER(RewardAdType.REWARDED_DISPLAY)
+    CANDLE(RewardAdType.REWARDED_CANDLES),
+    FLOWER(RewardAdType.REWARDED_FLOWERS)
 }
 
 data class Offset(
@@ -47,25 +45,21 @@ data class Offset(
 object MemorialItems {
 
     private const val PLAQUE_SPACING = 0.26f
-    private const val PLATE_SPACING = 0.18f
+    private const val FLOWER_SPACING = 0.1f
+    private const val CANDLE_SPACING = 0.07f
     private const val POT_Z = 0.25f
     private const val POT_INNER_RADIUS = 0.035f
 
     /**
-     * Arranges a memorial's offerings around its anchor: plaques in a row at the back flanked by
-     * two candles, incense sticks in a pot at the front, fruit plates to the left and food bowls
-     * to the right (each in a compact grid, so large quantities stay close together).
+     * Arranges a memorial's offerings around its anchor: plaques in a row at the back, incense
+     * sticks in a pot at the front, flowers to the left and candles to the right (each in a
+     * compact grid, so large quantities stay close together).
      */
     fun layoutFor(offerings: MemorialOfferings): List<Pair<MemorialItemType, Offset>> = buildList {
         val plaqueCount = offerings.plaques
         repeat(plaqueCount) { i ->
             add(MemorialItemType.PLAQUE to Offset((i - (plaqueCount - 1) / 2f) * PLAQUE_SPACING, 0f, 0f, 0f))
         }
-
-        // Candles are decoration, not wallet items, so every memorial gets a pair
-        val candleX = (plaqueCount - 1).coerceAtLeast(0) / 2f * PLAQUE_SPACING + 0.2f
-        add(MemorialItemType.CANDLE to Offset(-candleX, 0f, 0.1f, 0f))
-        add(MemorialItemType.CANDLE to Offset(candleX, 0f, 0.1f, 0f))
 
         val sticks = offerings.incenseSticks
         if (sticks > 0) {
@@ -78,22 +72,23 @@ object MemorialItems {
             }
         }
 
-        addGrid(MemorialItemType.FRUIT_OFFERING, offerings.fruit, xStart = -0.3f, xDirection = -1f)
-        addGrid(MemorialItemType.FOOD_OFFERING, offerings.food, xStart = 0.3f, xDirection = 1f)
+        addGrid(MemorialItemType.FLOWER, offerings.flowers, xStart = -0.25f, xDirection = -1f, spacing = FLOWER_SPACING)
+        addGrid(MemorialItemType.CANDLE, offerings.candles, xStart = 0.25f, xDirection = 1f, spacing = CANDLE_SPACING)
     }
 
     private fun MutableList<Pair<MemorialItemType, Offset>>.addGrid(
         type: MemorialItemType,
         count: Int,
         xStart: Float,
-        xDirection: Float
+        xDirection: Float,
+        spacing: Float
     ) {
         if (count <= 0) return
         val columns = ceil(sqrt(count.toFloat())).toInt()
         repeat(count) { i ->
             val column = i % columns
             val row = i / columns
-            add(type to Offset(xStart + xDirection * column * PLATE_SPACING, 0f, 0.2f + row * PLATE_SPACING, 0f))
+            add(type to Offset(xStart + xDirection * column * spacing, 0f, 0.15f + row * spacing, 0f))
         }
     }
 
@@ -114,8 +109,6 @@ object MemorialItems {
                     MemorialItemType.INCENSE_POT -> incensePot(engine, materialLoader)
                     MemorialItemType.INCENSE_BOX -> incenseBox(engine, materialLoader)
                     MemorialItemType.INCENSE_PAPER -> incensePaper(engine, materialLoader)
-                    MemorialItemType.FRUIT_OFFERING -> fruitOffering(engine, materialLoader)
-                    MemorialItemType.FOOD_OFFERING -> foodOffering(engine, materialLoader)
                     MemorialItemType.CANDLE -> candle(engine, materialLoader)
                     MemorialItemType.FLOWER -> flower(engine, materialLoader)
                 }
@@ -232,53 +225,8 @@ object MemorialItems {
         )
     }
 
-    fun fruitOffering(engine: Engine, materialLoader: MaterialLoader): Node {
-        val material = materialLoader.createColorInstance(Color(1.0f, 0.5f, 0.0f))
-        val radius = 0.04f
-
-        return Node(engine).apply {
-            // Central, right and left fruit
-            listOf(
-                Position(0f, radius, 0f),
-                Position(radius * 1.1f, radius, radius * 0.5f),
-                Position(-radius * 1.1f, radius, radius * 0.5f)
-            ).forEach { center ->
-                addChildNode(SphereNode(engine = engine, radius = radius, center = center, materialInstance = material))
-            }
-        }
-    }
-
-    fun foodOffering(engine: Engine, materialLoader: MaterialLoader): Node {
-        val bowlMat = materialLoader.createColorInstance(Color(0.9f, 0.9f, 0.9f))
-        val foodMat = materialLoader.createColorInstance(Color(0.6f, 0.3f, 0.1f))
-
-        val bowlRadius = 0.06f
-        val bowlHeight = 0.04f
-        val foodRadius = 0.05f
-
-        return Node(engine).apply {
-            addChildNode(
-                CylinderNode(
-                    engine = engine,
-                    radius = bowlRadius,
-                    height = bowlHeight,
-                    center = Position(0f, bowlHeight / 2f, 0f),
-                    materialInstance = bowlMat
-                )
-            )
-            addChildNode(
-                SphereNode(
-                    engine = engine,
-                    radius = foodRadius,
-                    center = Position(0f, bowlHeight + foodRadius / 2f, 0f),
-                    materialInstance = foodMat
-                )
-            )
-        }
-    }
-
     fun candle(engine: Engine, materialLoader: MaterialLoader): Node {
-        val candleMat = materialLoader.createColorInstance(Color(0.8f, 0.1f, 0.1f))
+        val candleMat = materialLoader.createColorInstance(Color(0.96f, 0.93f, 0.84f)) // Ivory
         val flameMat = materialLoader.createColorInstance(Color(1.0f, 0.9f, 0.0f))
 
         val radius = 0.015f

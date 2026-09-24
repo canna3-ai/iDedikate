@@ -38,20 +38,6 @@ object MemorialCatalog {
             anchorType = "child"
         ),
         MemorialItemDef(
-            id = "fruit_offering",
-            name = "Fruit offering",
-            geometryDescription = "Sphere or lathe, 3 fruit clustered",
-            referenceSize = "Ø0.07 m each",
-            anchorType = "child"
-        ),
-        MemorialItemDef(
-            id = "food_offering",
-            name = "Food offering",
-            geometryDescription = "Shallow bowl + dome",
-            referenceSize = "Ø0.12 m",
-            anchorType = "child"
-        ),
-        MemorialItemDef(
             id = "candle",
             name = "Candle",
             geometryDescription = "Cylinder + small flame cone",

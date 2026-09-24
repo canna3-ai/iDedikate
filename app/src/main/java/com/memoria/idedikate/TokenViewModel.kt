@@ -1,122 +1,136 @@
 package com.memoria.idedikate
 
-import android.app.Application
-import android.content.Context
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
-import androidx.lifecycle.AndroidViewModel
+import android.util.Log
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentReference
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.memoria.idedikate.ads.RewardAdType
 import com.memoria.idedikate.model.MemorialOfferings
 import com.memoria.idedikate.model.OfferingType
+import com.memoria.idedikate.model.Wallet
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 
-private val Context.walletDataStore by preferencesDataStore(name = "wallet")
-
-/** Wallet balances, persisted on-device with DataStore and kept separately per signed-in user. */
-class TokenViewModel(application: Application) : AndroidViewModel(application) {
-    private val dataStore = application.walletDataStore
+/**
+ * The signed-in user's wallet, stored in Firestore at `wallets/{uid}` so it follows the account
+ * across devices. Firestore's cache keeps it usable offline, and firestore.rules validates every
+ * change (reward amounts, rate limit, memorial costs).
+ */
+class TokenViewModel : ViewModel() {
     private val auth = FirebaseAuth.getInstance()
+    private val db = FirebaseFirestore.getInstance()
+    private var registration: ListenerRegistration? = null
+    private var listeningUid: String? = null
 
-    private val uid = MutableStateFlow(auth.currentUser?.uid)
-    private val authStateListener = FirebaseAuth.AuthStateListener { uid.value = it.currentUser?.uid }
+    private val balances = MutableStateFlow<Map<RewardAdType, Int>>(emptyMap())
+
+    val tokens: StateFlow<Int> = balance(RewardAdType.REWARDED_TOKENS)
+    val plaques: StateFlow<Int> = balance(RewardAdType.REWARDED_DISPLAY)
+    val incenseSticks: StateFlow<Int> = balance(RewardAdType.REWARDED_INCENSE)
+    val flowers: StateFlow<Int> = balance(RewardAdType.REWARDED_FLOWERS)
+    val candles: StateFlow<Int> = balance(RewardAdType.REWARDED_CANDLES)
+
+    /** Offerings the user owns and can place at a memorial. */
+    val offeringStock: StateFlow<MemorialOfferings> = balances
+        .map { b ->
+            MemorialOfferings(
+                plaques = b[RewardAdType.REWARDED_DISPLAY] ?: 0,
+                incenseSticks = b[RewardAdType.REWARDED_INCENSE] ?: 0,
+                flowers = b[RewardAdType.REWARDED_FLOWERS] ?: 0,
+                candles = b[RewardAdType.REWARDED_CANDLES] ?: 0
+            )
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, MemorialOfferings())
+
+    // Fires immediately with the current user, then on every sign-in/out
+    private val authStateListener = FirebaseAuth.AuthStateListener { listenTo(it.currentUser?.uid) }
 
     init {
         auth.addAuthStateListener(authStateListener)
     }
 
-    val tokens: StateFlow<Int> = balance(RewardAdType.REWARDED_TOKENS)
-    val plaques: StateFlow<Int> = balance(RewardAdType.REWARDED_DISPLAY)
-    val incenseSticks: StateFlow<Int> = balance(RewardAdType.REWARDED_INCENSE)
-    val fruitOfferings: StateFlow<Int> = balance(RewardAdType.REWARDED_FRUITS)
-    val foodOfferings: StateFlow<Int> = balance(RewardAdType.REWARDED_FOOD)
-
-    /** Offerings the user owns and can place at a memorial. */
-    val offeringStock: StateFlow<MemorialOfferings> =
-        combine(plaques, incenseSticks, fruitOfferings, foodOfferings) { plaques, incense, fruit, food ->
-            MemorialOfferings(plaques = plaques, incenseSticks = incense, fruit = fruit, food = food)
-        }.stateIn(viewModelScope, SharingStarted.Eagerly, MemorialOfferings())
-
-    fun addTokens(amount: Int) = addItem(RewardAdType.REWARDED_TOKENS, amount)
-
-    /** Deducts [amount] tokens if the balance allows it. Returns true on success. */
-    suspend fun spendTokens(amount: Int): Boolean {
-        var spent = false
-        // DataStore serialises edits, so check-and-deduct is atomic
-        dataStore.edit { prefs ->
-            val key = key(uid.value, RewardAdType.REWARDED_TOKENS)
-            val current = prefs.balanceOf(key, RewardAdType.REWARDED_TOKENS)
-            if (current >= amount) {
-                prefs[key] = current - amount
-                spent = true
-            }
-        }
-        return spent
-    }
-
     /**
-     * Deducts [tokens] plus every offering in [offerings] in a single edit, so nothing is spent
-     * unless the user can afford all of it. Returns true on success.
+     * Credits the configured reward for [type]. The rules only accept exactly that amount, at most
+     * once every 15 seconds, so [onFailure] fires if the write is rejected.
      */
-    suspend fun spendForMemorial(tokens: Int, offerings: MemorialOfferings): Boolean {
-        val cost = buildMap {
-            put(RewardAdType.REWARDED_TOKENS, tokens)
-            OfferingType.entries.forEach { type -> merge(type.rewardAdType, offerings[type], Int::plus) }
-        }.filterValues { it > 0 }
-
-        var spent = false
-        dataStore.edit { prefs ->
-            val currentUid = uid.value
-            val affordable = cost.all { (type, amount) -> prefs.balanceOf(key(currentUid, type), type) >= amount }
-            if (affordable) {
-                cost.forEach { (type, amount) ->
-                    val key = key(currentUid, type)
-                    prefs[key] = prefs.balanceOf(key, type) - amount
-                }
-                spent = true
+    fun addReward(type: RewardAdType, onFailure: (Exception) -> Unit) {
+        val uid = auth.currentUser?.uid
+        if (uid == null) {
+            onFailure(IllegalStateException("Not signed in"))
+            return
+        }
+        Wallet.ref(db, uid)
+            .update(
+                mapOf(
+                    Wallet.field(type) to FieldValue.increment(type.configuredRewardAmount.toLong()),
+                    Wallet.FIELD_LAST_REWARD_AT to FieldValue.serverTimestamp()
+                )
+            )
+            .addOnFailureListener { e ->
+                Log.e(TAG, "Failed to credit ${type.name}", e)
+                onFailure(e)
             }
-        }
-        return spent
-    }
-
-    /** Returns what [spendForMemorial] took, e.g. when the server rejects the memorial. */
-    fun refundMemorial(tokens: Int, offerings: MemorialOfferings) {
-        if (tokens > 0) addItem(RewardAdType.REWARDED_TOKENS, tokens)
-        OfferingType.entries.forEach { type ->
-            offerings[type].takeIf { it > 0 }?.let { addItem(type.rewardAdType, it) }
-        }
-    }
-
-    fun addItem(type: RewardAdType, amount: Int) {
-        val key = key(uid.value, type)
-        viewModelScope.launch {
-            dataStore.edit { prefs -> prefs[key] = prefs.balanceOf(key, type) + amount }
-        }
     }
 
     override fun onCleared() {
         auth.removeAuthStateListener(authStateListener)
+        registration?.remove()
         super.onCleared()
     }
 
+    private fun listenTo(uid: String?) {
+        if (uid == listeningUid) return
+        registration?.remove()
+        registration = null
+        listeningUid = uid
+        balances.value = emptyMap()
+        if (uid == null) return
+
+        val ref = Wallet.ref(db, uid)
+        registration = ref.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                // Rejected with PERMISSION_DENIED once the user signs out; that's expected
+                if (auth.currentUser != null) Log.e(TAG, "Failed to load wallet", error)
+                return@addSnapshotListener
+            }
+            if (snapshot == null) return@addSnapshotListener
+            if (!snapshot.exists()) {
+                // Only trust "missing" from the server, not from an empty offline cache
+                if (!snapshot.metadata.isFromCache) createWallet(ref)
+                return@addSnapshotListener
+            }
+            val data = snapshot.data.orEmpty()
+            // Older wallets store flowers/candles as "fruit"/"food": move them once to the new fields
+            Wallet.legacyMigration(data)?.let { update ->
+                ref.update(update).addOnFailureListener { e -> Log.e(TAG, "Failed to migrate wallet", e) }
+            }
+            // Until the migration lands, show the balances from the old field names
+            val legacyKeys = OfferingType.entries.associate { it.rewardAdType to it.legacyFirestoreKey }
+            balances.value = RewardAdType.entries.associateWith { type ->
+                val value = snapshot.getLong(Wallet.field(type)) ?: legacyKeys[type]?.let { snapshot.getLong(it) }
+                (value ?: 0L).toInt()
+            }
+        }
+    }
+
+    private fun createWallet(ref: DocumentReference) {
+        // Transaction so two devices signing in at once can't both create it
+        db.runTransaction { transaction ->
+            if (!transaction.get(ref).exists()) transaction.set(ref, Wallet.starter())
+        }.addOnFailureListener { e -> Log.e(TAG, "Failed to create wallet", e) }
+    }
+
     private fun balance(type: RewardAdType): StateFlow<Int> =
-        combine(uid, dataStore.data) { currentUid, prefs -> prefs.balanceOf(key(currentUid, type), type) }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
-
-    private fun Preferences.balanceOf(key: Preferences.Key<Int>, type: RewardAdType): Int =
-        this[key] ?: if (type == RewardAdType.REWARDED_TOKENS) STARTER_TOKENS else 0
-
-    private fun key(uid: String?, type: RewardAdType) = intPreferencesKey("${uid ?: "guest"}_${type.name}")
+        balances.map { it[type] ?: 0 }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     private companion object {
-        const val STARTER_TOKENS = 5
+        const val TAG = "TokenViewModel"
     }
 }

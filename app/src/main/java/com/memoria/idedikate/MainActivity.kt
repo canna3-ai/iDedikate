@@ -14,17 +14,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountBalanceWallet
-import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.LocalFireDepartment
-import androidx.compose.material.icons.filled.LocalFlorist
 import androidx.compose.material.icons.filled.Map
-import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -68,6 +63,11 @@ import androidx.compose.ui.text.style.TextAlign
 import android.widget.Toast
 import com.memoria.idedikate.ui.LoginScreen
 import com.memoria.idedikate.ui.AuthViewModel
+import com.memoria.idedikate.ui.OfferingIcons
+import com.memoria.idedikate.ui.MemorialListScreen
+import com.memoria.idedikate.model.MemorialItem
+import com.google.android.gms.maps.model.LatLng
+import androidx.compose.ui.graphics.Color
 import com.memoria.idedikate.model.ArMemorial
 import com.memoria.idedikate.model.toArMemorial
 import androidx.credentials.CredentialManager
@@ -93,7 +93,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 @Serializable
-data object MapRoute : NavKey
+/** [focusLatitude]/[focusLongitude]: a memorial to centre on (from the List tab); null centres on the user. */
+data class MapRoute(val focusLatitude: Double? = null, val focusLongitude: Double? = null) : NavKey {
+    val focus: LatLng? get() = if (focusLatitude != null && focusLongitude != null) LatLng(focusLatitude, focusLongitude) else null
+}
 
 @Serializable
 /** [memorial] is the memorial chosen on the map; null when opened from the tab bar. */
@@ -188,9 +191,13 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
         return
     }
 
-    val backStack = rememberNavBackStack(MapRoute)
+    val backStack = rememberNavBackStack(MapRoute())
     val context = LocalContext.current
     val activity = context.findActivity()
+    val openInAr: (MemorialItem) -> Unit = { memorial ->
+        backStack.clear()
+        backStack.add(ARRoute(memorial.toArMemorial()))
+    }
     val coroutineScope = rememberCoroutineScope()
     var showSignOutDialog by remember { mutableStateOf(false) }
 
@@ -198,7 +205,7 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
         AlertDialog(
             onDismissRequest = { showSignOutDialog = false },
             title = { Text("Sign out?") },
-            text = { Text("You can sign back in any time. Your wallet stays saved on this device.") },
+            text = { Text("You can sign back in any time. Your wallet is saved to your account.") },
             confirmButton = {
                 TextButton(onClick = {
                     showSignOutDialog = false
@@ -242,7 +249,7 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                     onClick = {
                         if (currentRoute !is MapRoute) {
                             backStack.clear()
-                            backStack.add(MapRoute)
+                            backStack.add(MapRoute())
                         }
                     },
                     icon = { Icon(Icons.Default.Map, contentDescription = "Map") },
@@ -297,14 +304,20 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                             is MapRoute -> NavEntry(key) {
                                 MapScreen(
                                     tokenViewModel = tokenViewModel,
-                                    onViewInAr = { memorial ->
-                                        backStack.clear()
-                                        backStack.add(ARRoute(memorial.toArMemorial()))
-                                    }
+                                    focus = key.focus,
+                                    onViewInAr = openInAr
                                 )
                             }
                             is ARRoute -> NavEntry(key) { ARScreen(key.memorial) }
-                            is ListRoute -> NavEntry(key) { ListScreen() }
+                            is ListRoute -> NavEntry(key) {
+                                MemorialListScreen(
+                                    onViewInAr = openInAr,
+                                    onShowOnMap = { memorial ->
+                                        backStack.clear()
+                                        backStack.add(MapRoute(memorial.latitude, memorial.longitude))
+                                    }
+                                )
+                            }
                             is WalletRoute -> NavEntry(key) { WalletScreen(tokenViewModel) }
                             else -> error("Unknown route: $key")
                         }
@@ -318,116 +331,93 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
 
 
 @Composable
-fun ListScreen() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.AutoMirrored.Filled.List, contentDescription = null, modifier = Modifier.padding(16.dp))
-            Text("List View", style = MaterialTheme.typography.headlineMedium)
-            Text("List of memorials will go here")
-        }
-    }
-}
-
-@Composable
 fun WalletScreen(tokenViewModel: TokenViewModel) {
     val tokens by tokenViewModel.tokens.collectAsState()
     val plaques by tokenViewModel.plaques.collectAsState()
     val incense by tokenViewModel.incenseSticks.collectAsState()
-    val fruits by tokenViewModel.fruitOfferings.collectAsState()
-    val food by tokenViewModel.foodOfferings.collectAsState()
+    val flowers by tokenViewModel.flowers.collectAsState()
+    val candles by tokenViewModel.candles.collectAsState()
 
     val context = LocalContext.current
     val adHelper = remember { RewardedAdHelper(context) }
-    
+
     val inventoryItems = listOf(
-        InventoryItem("General Tokens", Icons.Default.Star, RewardAdType.REWARDED_TOKENS, tokens),
-        InventoryItem("Memorial Plaque", Icons.Default.Dashboard, RewardAdType.REWARDED_DISPLAY, plaques),
-        InventoryItem("Incense Sticks", Icons.Default.LocalFireDepartment, RewardAdType.REWARDED_INCENSE, incense),
-        InventoryItem("Fruit Offerings", Icons.Default.LocalFlorist, RewardAdType.REWARDED_FRUITS, fruits),
-        InventoryItem("Food Offerings", Icons.Default.Restaurant, RewardAdType.REWARDED_FOOD, food)
+        InventoryItem("General Tokens", Icons.Default.Star, RewardAdType.REWARDED_TOKENS, tokens, isIllustration = false),
+        InventoryItem("Memorial Plaque", OfferingIcons.MemorialPlaque, RewardAdType.REWARDED_DISPLAY, plaques),
+        InventoryItem("Incense Sticks", OfferingIcons.IncenseStick, RewardAdType.REWARDED_INCENSE, incense),
+        InventoryItem("Flowers", OfferingIcons.Flowers, RewardAdType.REWARDED_FLOWERS, flowers),
+        InventoryItem("Candles", OfferingIcons.Candle, RewardAdType.REWARDED_CANDLES, candles)
     )
-    
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Default.AccountBalanceWallet,
-                contentDescription = null,
-                modifier = Modifier
-                    .padding(end = 16.dp)
-                    .size(48.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Column {
-                Text("Your Wallet", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text("Manage your tokens and offerings", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+    // Compact rows so every item fits on a typical phone screen; still scrolls on smaller ones
+    LazyColumn(
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.AccountBalanceWallet,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .padding(end = 16.dp)
+                        .size(40.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Column {
+                    Text("Your Wallet", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Watch a short ad to earn tokens and offerings",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
-        
-        Text(
-            text = "Inventory Items",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-        )
-        
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            contentPadding = PaddingValues(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            items(inventoryItems) { item ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+
+        items(inventoryItems) { item ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
+                    Box(modifier = Modifier.size(52.dp), contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = item.icon,
                             contentDescription = item.name,
-                            modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                            modifier = Modifier.size(if (item.isIllustration) 52.dp else 40.dp),
+                            // Illustrations keep their own colours; plain icons follow the theme
+                            tint = if (item.isIllustration) Color.Unspecified else MaterialTheme.colorScheme.primary
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(item.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text(
-                            text = item.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Owned: ${item.balance}",
+                            "Owned: ${item.balance}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(
-                            onClick = {
-                                val activity = context.findActivity() ?: return@Button
-                                val shown = adHelper.showAd(activity, item.adType) { reward, _ ->
-                                    tokenViewModel.addItem(item.adType, reward)
+                    }
+                    Button(
+                        onClick = {
+                            val activity = context.findActivity() ?: return@Button
+                            val shown = adHelper.showAd(activity, item.adType) { _, _ ->
+                                tokenViewModel.addReward(item.adType) { e ->
+                                    Toast.makeText(context, "Couldn't save your reward: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                                 }
-                                if (!shown) {
-                                    Toast.makeText(context, "Ad not ready yet, please try again shortly", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Earn", textAlign = TextAlign.Center)
+                            }
+                            if (!shown) {
+                                Toast.makeText(context, "Ad not ready yet, please try again shortly", Toast.LENGTH_SHORT).show()
+                            }
                         }
+                    ) {
+                        Text("Earn +${item.adType.configuredRewardAmount}")
                     }
                 }
             }
@@ -445,5 +435,7 @@ data class InventoryItem(
     val name: String,
     val icon: ImageVector,
     val adType: RewardAdType,
-    val balance: Int
+    val balance: Int,
+    /** Full-colour artwork (see [OfferingIcons]) rather than a single-colour Material icon. */
+    val isIllustration: Boolean = true
 )

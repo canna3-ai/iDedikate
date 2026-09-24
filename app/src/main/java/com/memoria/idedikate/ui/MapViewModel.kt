@@ -12,6 +12,8 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.memoria.idedikate.model.MemorialItem
 import com.memoria.idedikate.model.MemorialOfferings
+import com.memoria.idedikate.model.OfferingType
+import com.memoria.idedikate.model.Wallet
 import com.memoria.idedikate.model.PinVisibility
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,7 +28,8 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class MapViewModel : ViewModel() {
     private val auth = FirebaseAuth.getInstance()
-    private val collection = FirebaseFirestore.getInstance().collection(COLLECTION)
+    private val db = FirebaseFirestore.getInstance()
+    private val collection = db.collection(COLLECTION)
     private val registrations = mutableListOf<ListenerRegistration>()
     private val results = mutableMapOf<String, List<MemorialItem>>()
     private var loadedForUid: String? = null
@@ -37,12 +40,23 @@ class MapViewModel : ViewModel() {
     private val _syncError = MutableStateFlow<String?>(null)
     val syncError: StateFlow<String?> = _syncError.asStateFlow()
 
+    // List tab: all of the user's memorials and those shared with them, not limited to the map area
+    private val listRegistrations = mutableListOf<ListenerRegistration>()
+    private var listUid: String? = null
+
+    private val _myMemorials = MutableStateFlow<List<MemorialItem>>(emptyList())
+    val myMemorials: StateFlow<List<MemorialItem>> = _myMemorials.asStateFlow()
+
+    private val _sharedWithMe = MutableStateFlow<List<MemorialItem>>(emptyList())
+    val sharedWithMe: StateFlow<List<MemorialItem>> = _sharedWithMe.asStateFlow()
+
     val currentUid: String? get() = auth.currentUser?.uid
     val currentEmail: String? get() = auth.currentUser?.email?.lowercase()
 
     // This ViewModel is activity-scoped, so drop another user's pins as soon as they sign out
     private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
         if (firebaseAuth.currentUser?.uid != loadedForUid) stopListening()
+        listenForList(firebaseAuth.currentUser?.uid)
     }
 
     init {
@@ -64,8 +78,13 @@ class MapViewModel : ViewModel() {
         }
     }
 
-    /** Writes a new memorial with its [offerings]. The listener shows it immediately; [onFailure] fires if the server rejects it. */
-    fun dropPin(
+    /**
+     * Creates a memorial and pays for it (1 token + its [offerings]) in one batched write, so one
+     * can't happen without the other; the rules check the deduction against the memorial. The
+     * listeners show both changes immediately, and Firestore rolls them back locally if the
+     * server rejects the batch, in which case [onFailure] fires.
+     */
+    fun placeMemorial(
         latLng: LatLng,
         message: String,
         visibility: PinVisibility,
@@ -78,21 +97,31 @@ class MapViewModel : ViewModel() {
             onFailure(IllegalStateException("Not signed in"))
             return
         }
-        collection.document()
-            .set(
-                mapOf(
-                    FIELD_LATITUDE to latLng.latitude,
-                    FIELD_LONGITUDE to latLng.longitude,
-                    FIELD_MESSAGE to message,
-                    FIELD_OWNER_UID to uid,
-                    FIELD_VISIBILITY to visibility.firestoreValue,
-                    FIELD_SHARED_WITH to normalizeSharedWith(visibility, sharedWith),
-                    FIELD_OFFERINGS to offerings.toFirestore(),
-                    FIELD_CREATED_AT to FieldValue.serverTimestamp()
-                )
-            )
+        val memorialRef = collection.document()
+        val memorial = mapOf(
+            FIELD_LATITUDE to latLng.latitude,
+            FIELD_LONGITUDE to latLng.longitude,
+            FIELD_MESSAGE to message,
+            FIELD_OWNER_UID to uid,
+            FIELD_VISIBILITY to visibility.firestoreValue,
+            FIELD_SHARED_WITH to normalizeSharedWith(visibility, sharedWith),
+            FIELD_OFFERINGS to offerings.toFirestore(),
+            FIELD_CREATED_AT to FieldValue.serverTimestamp()
+        )
+        val payment = buildMap<String, Any> {
+            put(Wallet.FIELD_TOKENS, FieldValue.increment(-Wallet.MEMORIAL_TOKEN_COST.toLong()))
+            OfferingType.entries.forEach { type ->
+                offerings[type].takeIf { it > 0 }?.let { put(type.firestoreKey, FieldValue.increment(-it.toLong())) }
+            }
+            put(Wallet.FIELD_LAST_MEMORIAL_ID, memorialRef.id)
+        }
+
+        db.batch()
+            .set(memorialRef, memorial)
+            .update(Wallet.ref(db, uid), payment)
+            .commit()
             .addOnFailureListener { e ->
-                Log.e(TAG, "Failed to save memorial", e)
+                Log.e(TAG, "Failed to place memorial", e)
                 onFailure(e)
             }
     }
@@ -133,8 +162,37 @@ class MapViewModel : ViewModel() {
     override fun onCleared() {
         auth.removeAuthStateListener(authStateListener)
         registrations.forEach { it.remove() }
+        listRegistrations.forEach { it.remove() }
         super.onCleared()
     }
+
+    private fun listenForList(uid: String?) {
+        if (uid == listUid) return
+        listRegistrations.forEach { it.remove() }
+        listRegistrations.clear()
+        listUid = uid
+        _myMemorials.value = emptyList()
+        _sharedWithMe.value = emptyList()
+        if (uid == null) return
+
+        listRegistrations += listenNewestFirst(collection.whereEqualTo(FIELD_OWNER_UID, uid), _myMemorials)
+        currentEmail?.let { email ->
+            listRegistrations += listenNewestFirst(collection.whereArrayContains(FIELD_SHARED_WITH, email), _sharedWithMe)
+        }
+    }
+
+    // Sorted locally: ordering in the query would need an extra composite index
+    private fun listenNewestFirst(query: Query, target: MutableStateFlow<List<MemorialItem>>): ListenerRegistration =
+        query.limit(MAX_LIST_ITEMS).addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                if (auth.currentUser != null) Log.e(TAG, "Failed to load memorial list", error)
+                return@addSnapshotListener
+            }
+            target.value = snapshot?.documents.orEmpty()
+                .mapNotNull { it.toMemorialItem() }
+                // A just-placed memorial has no server time yet; it's the newest
+                .sortedByDescending { if (it.createdAtMillis == 0L) Long.MAX_VALUE else it.createdAtMillis }
+        }
 
     private fun listen(source: String, query: Query, bounds: LatLngBounds) {
         registrations += query
@@ -189,7 +247,8 @@ class MapViewModel : ViewModel() {
             ownerUid = getString(FIELD_OWNER_UID).orEmpty(),
             visibility = PinVisibility.fromFirestore(getString(FIELD_VISIBILITY)),
             sharedWith = (get(FIELD_SHARED_WITH) as? List<String>).orEmpty(),
-            offerings = MemorialOfferings.fromFirestore(get(FIELD_OFFERINGS) as? Map<*, *>)
+            offerings = MemorialOfferings.fromFirestore(get(FIELD_OFFERINGS) as? Map<*, *>),
+            createdAtMillis = getTimestamp(FIELD_CREATED_AT)?.toDate()?.time ?: 0
         )
     }
 
@@ -215,5 +274,6 @@ class MapViewModel : ViewModel() {
         const val SOURCE_OWN = "own"
         const val SOURCE_SHARED = "shared"
         const val MAX_PINS_PER_QUERY = 500L
+        const val MAX_LIST_ITEMS = 200L
     }
 }

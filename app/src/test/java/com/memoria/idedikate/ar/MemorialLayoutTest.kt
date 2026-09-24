@@ -12,15 +12,14 @@ class MemorialLayoutTest {
     private fun List<Pair<MemorialItemType, Offset>>.offsets(type: MemorialItemType) = filter { it.first == type }.map { it.second }
 
     @Test
-    fun `places exactly the chosen offerings plus two candles`() {
-        val layout = MemorialItems.layoutFor(MemorialOfferings(plaques = 1, incenseSticks = 3, fruit = 1, food = 2))
+    fun `places exactly the chosen offerings`() {
+        val layout = MemorialItems.layoutFor(MemorialOfferings(plaques = 1, incenseSticks = 3, flowers = 2, candles = 4))
 
         assertEquals(1, layout.count(MemorialItemType.PLAQUE))
         assertEquals(3, layout.count(MemorialItemType.INCENSE_STICK))
         assertEquals(1, layout.count(MemorialItemType.INCENSE_POT))
-        assertEquals(1, layout.count(MemorialItemType.FRUIT_OFFERING))
-        assertEquals(2, layout.count(MemorialItemType.FOOD_OFFERING))
-        assertEquals(2, layout.count(MemorialItemType.CANDLE))
+        assertEquals(2, layout.count(MemorialItemType.FLOWER))
+        assertEquals(4, layout.count(MemorialItemType.CANDLE))
     }
 
     @Test
@@ -32,10 +31,8 @@ class MemorialLayoutTest {
     }
 
     @Test
-    fun `empty memorial still gets candles`() {
-        val layout = MemorialItems.layoutFor(MemorialOfferings())
-
-        assertEquals(listOf(MemorialItemType.CANDLE, MemorialItemType.CANDLE), layout.map { it.first })
+    fun `empty memorial places nothing`() {
+        assertTrue(MemorialItems.layoutFor(MemorialOfferings()).isEmpty())
     }
 
     @Test
@@ -49,33 +46,40 @@ class MemorialLayoutTest {
     }
 
     @Test
-    fun `plaques are centred and candles sit outside them`() {
+    fun `plaques are centred`() {
         val layout = MemorialItems.layoutFor(MemorialOfferings(plaques = 3))
-        val plaqueX = layout.offsets(MemorialItemType.PLAQUE).map { it.x }
-        val candleX = layout.offsets(MemorialItemType.CANDLE).map { it.x }
 
-        assertEquals(0f, plaqueX.sum(), 1e-4f)
-        assertTrue(candleX.min() < plaqueX.min() && candleX.max() > plaqueX.max())
+        assertEquals(0f, layout.offsets(MemorialItemType.PLAQUE).sumOf { it.x.toDouble() }.toFloat(), 1e-4f)
     }
 
     @Test
-    fun `fruit on the left, food on the right, no two plates overlapping`() {
-        val layout = MemorialItems.layoutFor(MemorialOfferings(fruit = 10, food = 10))
-        val fruit = layout.offsets(MemorialItemType.FRUIT_OFFERING)
-        val food = layout.offsets(MemorialItemType.FOOD_OFFERING)
+    fun `flowers on the left, candles on the right, none overlapping`() {
+        val layout = MemorialItems.layoutFor(MemorialOfferings(flowers = 10, candles = 10))
+        val flowers = layout.offsets(MemorialItemType.FLOWER)
+        val candles = layout.offsets(MemorialItemType.CANDLE)
 
-        assertTrue(fruit.all { it.x < 0f })
-        assertTrue(food.all { it.x > 0f })
-        val plates = fruit + food
-        assertEquals(plates.size, plates.map { it.x to it.z }.distinct().size)
+        assertTrue(flowers.all { it.x < 0f })
+        assertTrue(candles.all { it.x > 0f })
+        val all = flowers + candles
+        assertEquals(all.size, all.map { it.x to it.z }.distinct().size)
     }
 
     @Test
     fun `firestore round trip keeps quantities and clamps bad values`() {
-        val offerings = MemorialOfferings(plaques = 1, incenseSticks = 5, fruit = 2, food = 2)
+        val offerings = MemorialOfferings(plaques = 1, incenseSticks = 5, flowers = 2, candles = 2)
         assertEquals(offerings, MemorialOfferings.fromFirestore(offerings.toFirestore()))
 
-        val tampered = mapOf("plaques" to 500L, "incenseSticks" to -3L, "fruit" to "x")
+        val tampered = mapOf("plaques" to 500L, "incenseSticks" to -3L, "flowers" to "x")
         assertEquals(MemorialOfferings(plaques = 99), MemorialOfferings.fromFirestore(tampered))
+    }
+
+    @Test
+    fun `memorials saved before the rename read fruit as flowers and food as candles`() {
+        val legacy = mapOf("plaques" to 1L, "incenseSticks" to 2L, "fruit" to 3L, "food" to 4L)
+
+        assertEquals(
+            MemorialOfferings(plaques = 1, incenseSticks = 2, flowers = 3, candles = 4),
+            MemorialOfferings.fromFirestore(legacy)
+        )
     }
 }

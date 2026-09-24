@@ -29,12 +29,12 @@ service cloud.firestore {
       // Offerings placed at the memorial: exactly these four counts, each 0-99
       function validOfferings(o) {
         return o is map
-          && o.keys().hasAll(['plaques', 'incenseSticks', 'fruit', 'food'])
-          && o.keys().hasOnly(['plaques', 'incenseSticks', 'fruit', 'food'])
+          && o.keys().hasAll(['plaques', 'incenseSticks', 'flowers', 'candles'])
+          && o.keys().hasOnly(['plaques', 'incenseSticks', 'flowers', 'candles'])
           && o.plaques is int && o.plaques >= 0 && o.plaques <= 99
           && o.incenseSticks is int && o.incenseSticks >= 0 && o.incenseSticks <= 99
-          && o.fruit is int && o.fruit >= 0 && o.fruit <= 99
-          && o.food is int && o.food >= 0 && o.food <= 99;
+          && o.flowers is int && o.flowers >= 0 && o.flowers <= 99
+          && o.candles is int && o.candles >= 0 && o.candles <= 99;
       }
 
       // Public pins: any signed-in user. Private: owner only. Shared: owner + listed emails.
@@ -54,7 +54,9 @@ service cloud.firestore {
         && request.resource.data.message.size() <= 200
         && request.resource.data.createdAt == request.time
         && validVisibility(request.resource.data)
-        && validOfferings(request.resource.data.offerings);
+        && validOfferings(request.resource.data.offerings)
+        // Must be paid for in the same batch: the wallet rules check the deduction for this memorial
+        && getAfter(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.get('lastMemorialId', '') == memorialId;
 
       // Owners may change who can see a pin, nothing else
       allow update: if isSignedIn() && isOwner()
@@ -62,6 +64,79 @@ service cloud.firestore {
         && validVisibility(request.resource.data);
 
       allow delete: if isSignedIn() && isOwner();
+    }
+
+    // Each user's wallet. Amounts here must match Wallet.kt and RewardAdType.configuredRewardAmount.
+    match /wallets/{uid} {
+      function isWalletOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+
+      // One completed rewarded ad: exactly one balance goes up by its configured amount,
+      // at most once every 15 seconds (a rewarded ad can't be finished faster than that)
+      function isReward(field, amount) {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([field, 'lastRewardAt'])
+          && request.resource.data[field] == resource.data[field] + amount
+          && request.resource.data.lastRewardAt == request.time
+          && request.time > resource.data.lastRewardAt + duration.value(15, 's');
+      }
+
+      // Paying for a memorial created in the same batch: 1 token plus exactly its offerings
+      function isMemorialPayment() {
+        let after = request.resource.data;
+        let memorialPath = /databases/$(database)/documents/memorials/$(after.lastMemorialId);
+        let memorial = getAfter(memorialPath).data;
+        return after.diff(resource.data).affectedKeys()
+               .hasOnly(['tokens', 'plaques', 'incenseSticks', 'flowers', 'candles', 'lastMemorialId'])
+          && after.lastMemorialId is string
+          // A brand-new memorial of this user's, so one memorial can't be "paid for" twice
+          && !exists(memorialPath)
+          && existsAfter(memorialPath)
+          && memorial.ownerUid == request.auth.uid
+          && after.tokens == resource.data.tokens - 1
+          && after.plaques == resource.data.plaques - memorial.offerings.plaques
+          && after.incenseSticks == resource.data.incenseSticks - memorial.offerings.incenseSticks
+          && after.flowers == resource.data.flowers - memorial.offerings.flowers
+          && after.candles == resource.data.candles - memorial.offerings.candles
+          && after.tokens >= 0 && after.plaques >= 0 && after.incenseSticks >= 0
+          && after.flowers >= 0 && after.candles >= 0;
+      }
+
+      // One-time rename for wallets created before flowers and candles replaced fruit and food:
+      // the old balances move across unchanged and the old fields are removed, nothing else
+      function isLegacyRename() {
+        let before = resource.data;
+        let after = request.resource.data;
+        return 'fruit' in before && 'food' in before
+          && !('flowers' in before) && !('candles' in before)
+          && after.diff(before).affectedKeys().hasOnly(['fruit', 'food', 'flowers', 'candles'])
+          && !('fruit' in after) && !('food' in after)
+          && after.flowers == before.fruit
+          && after.candles == before.food;
+      }
+
+      allow read: if isWalletOwner();
+
+      // New wallets start with the starter balance only (Wallet.STARTER_BALANCE)
+      allow create: if isWalletOwner()
+        && request.resource.data.keys().hasOnly(['tokens', 'plaques', 'incenseSticks', 'flowers', 'candles', 'lastRewardAt'])
+        && request.resource.data.tokens == 2
+        && request.resource.data.plaques == 1
+        && request.resource.data.incenseSticks == 4
+        && request.resource.data.flowers == 4
+        && request.resource.data.candles == 2
+        && request.resource.data.lastRewardAt == request.time;
+
+      allow update: if isWalletOwner()
+        && (isReward('tokens', 1)
+            || isReward('plaques', 1)
+            || isReward('incenseSticks', 5)
+            || isReward('flowers', 2)
+            || isReward('candles', 2)
+            || isMemorialPayment()
+            || isLegacyRename());
+
+      allow delete: if false;
     }
   }
 }

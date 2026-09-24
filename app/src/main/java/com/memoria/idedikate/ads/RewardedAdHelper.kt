@@ -17,16 +17,16 @@ import com.memoria.idedikate.BuildConfig
 private const val TEST_REWARDED_AD_UNIT_ID = "ca-app-pub-3940256099942544/5224354917"
 
 /**
- * @param configuredRewardAmount must match the reward amount set for the ad unit in AdMob.
- * Release builds use the amount reported by the ad; debug builds use this instead, because
- * Google's test ad unit always reports 10.
+ * @param configuredRewardAmount what one completed ad credits to the wallet. firestore.rules only
+ * accepts exactly this amount, so it is the source of truth; keep it in sync with the ad unit's
+ * reward in AdMob and with the rules.
  */
 enum class RewardAdType(private val productionAdUnitId: String, val configuredRewardAmount: Int) {
     REWARDED_TOKENS("ca-app-pub-7728928885479787/5204992073", configuredRewardAmount = 1),
     REWARDED_DISPLAY("ca-app-pub-7728928885479787/6326502052", configuredRewardAmount = 1),
     REWARDED_INCENSE("ca-app-pub-7728928885479787/6763731739", configuredRewardAmount = 5),
-    REWARDED_FRUITS("ca-app-pub-7728928885479787/2455539800", configuredRewardAmount = 2),
-    REWARDED_FOOD("ca-app-pub-7728928885479787/1912614324", configuredRewardAmount = 2);
+    REWARDED_FLOWERS("ca-app-pub-7728928885479787/2455539800", configuredRewardAmount = 2),
+    REWARDED_CANDLES("ca-app-pub-7728928885479787/1912614324", configuredRewardAmount = 2);
 
     val adUnitId: String
         get() = if (BuildConfig.DEBUG) TEST_REWARDED_AD_UNIT_ID else productionAdUnitId
@@ -99,9 +99,13 @@ class RewardedAdHelper(context: Context) {
             }
 
             rewardedAd.show(activity) { rewardItem ->
-                // The test ad unit's reward doesn't reflect our AdMob configuration
-                val rewardAmount = if (BuildConfig.DEBUG) type.configuredRewardAmount else rewardItem.amount
+                // The wallet rules only accept the configured amount. Google's test unit always
+                // reports 10, so only flag a mismatch for our own (production) ad units
+                val rewardAmount = type.configuredRewardAmount
                 val rewardItemType = rewardItem.type
+                if (!BuildConfig.DEBUG && rewardItem.amount != rewardAmount) {
+                    Log.w(tag, "AdMob reward for ${type.name} is ${rewardItem.amount}, but the app credits $rewardAmount. Update AdMob or configuredRewardAmount.")
+                }
                 Log.d(tag, "User earned the reward. Amount: $rewardAmount (ad reported ${rewardItem.amount}), Type: $rewardItemType")
                 onRewarded(rewardAmount, rewardItemType)
             }
