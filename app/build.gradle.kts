@@ -94,6 +94,8 @@ dependencies {
     implementation(libs.maps.compose)
     implementation(libs.arcore)
     implementation(libs.arsceneview)
+    // Keyless authorization for ARCore's Geospatial API (location-based AR)
+    implementation(libs.play.services.auth)
     implementation(libs.retrofit)
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)

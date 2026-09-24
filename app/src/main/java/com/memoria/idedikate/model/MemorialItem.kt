@@ -95,7 +95,11 @@ data class MemorialItem(
 @Serializable
 data class ArMemorial(
     val title: String,
-    val offerings: MemorialOfferings
+    val offerings: MemorialOfferings,
+    /** Where the memorial was placed; used to show it at its real-world spot. */
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )
 
-fun MemorialItem.toArMemorial() = ArMemorial(title = message, offerings = offerings)
+fun MemorialItem.toArMemorial() =
+    ArMemorial(title = message, offerings = offerings, latitude = latitude, longitude = longitude)
