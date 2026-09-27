@@ -82,7 +82,6 @@ class TokenViewModel : ViewModel() {
     override fun onCleared() {
         auth.removeAuthStateListener(authStateListener)
         registration?.remove()
-        super.onCleared()
     }
 
     private fun listenTo(uid: String?) {

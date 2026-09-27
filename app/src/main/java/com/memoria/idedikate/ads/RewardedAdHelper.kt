@@ -54,7 +54,7 @@ class RewardedAdHelper(context: Context) {
             adRequest,
             object : RewardedAdLoadCallback() {
                 override fun onAdFailedToLoad(adError: LoadAdError) {
-                    Log.d(tag, "Failed to load ${type.name}: " + adError.toString())
+                    Log.d(tag, "Failed to load ${type.name}: $adError")
                     loadingAds.remove(type)
                     loadedAds.remove(type)
                 }

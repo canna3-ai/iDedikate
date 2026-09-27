@@ -2,6 +2,7 @@ package com.memoria.idedikate.ar
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -37,7 +38,7 @@ class GeoMathTest {
         for (bearing in listOf(0.0, 45.0, 90.0, 180.0, 270.0)) {
             val q = GeoMath.facingQuaternion(bearing)
             // Rotation about Y by angle phi, where q = (0, sin(phi/2), 0, cos(phi/2))
-            val phi = 2 * kotlin.math.atan2(q.y.toDouble(), q.w.toDouble())
+            val phi = 2 * atan2(q.y.toDouble(), q.w.toDouble())
             val east = sin(phi)
             val south = cos(phi)
             assertEquals("east for $bearing", sin(Math.toRadians(bearing)), east, 1e-6)

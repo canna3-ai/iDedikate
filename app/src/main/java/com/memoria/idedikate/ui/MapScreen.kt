@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.UiComposable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.draw.shadow
@@ -68,7 +69,7 @@ import kotlin.math.roundToInt
 
 /**
  * Map marker for a memorial: a pill showing an icon for each offering placed there (with a count
- * when there's more than one), outlined in the visibility colour (red public, green shared,
+ * when there's more than one), outlined in the visibility color (red public, green shared,
  * violet private), with a pointer marking the exact spot.
  */
 @Composable
@@ -136,22 +137,22 @@ private fun MemorialMarker(visibility: PinVisibility, offerings: MemorialOfferin
 }
 
 /**
- * Marker size for a map zoom level: 1.0 at neighbourhood level (zoom 15), growing to 1.6 at street
+ * Marker size for a map zoom level: 1.0 at neighborhood level (zoom 15), growing to 1.6 at street
  * level (zoom 17 and closer) and shrinking to 0.3 at whole-island level (zoom 12 and further out).
  * Rounded to steps of 0.1 because every size change re-renders each marker's bitmap; continuous
  * scaling would redraw them on every frame of a pinch.
  */
 private fun markerScaleFor(zoom: Float): Float {
-    val scale = if (zoom >= NEIGHBOURHOOD_ZOOM) {
-        1f + (zoom - NEIGHBOURHOOD_ZOOM) * (STREET_SCALE - 1f) / (STREET_ZOOM - NEIGHBOURHOOD_ZOOM)
+    val scale = if (zoom >= NEIGHBORHOOD_ZOOM) {
+        1f + (zoom - NEIGHBORHOOD_ZOOM) * (STREET_SCALE - 1f) / (STREET_ZOOM - NEIGHBORHOOD_ZOOM)
     } else {
-        1f - (NEIGHBOURHOOD_ZOOM - zoom) * (1f - ISLAND_SCALE) / (NEIGHBOURHOOD_ZOOM - ISLAND_ZOOM)
+        1f - (NEIGHBORHOOD_ZOOM - zoom) * (1f - ISLAND_SCALE) / (NEIGHBORHOOD_ZOOM - ISLAND_ZOOM)
     }
     return (scale.coerceIn(ISLAND_SCALE, STREET_SCALE) * 10).roundToInt() / 10f
 }
 
 private const val ISLAND_ZOOM = 12f
-private const val NEIGHBOURHOOD_ZOOM = 15f
+private const val NEIGHBORHOOD_ZOOM = 15f
 private const val STREET_ZOOM = 17f
 private const val ISLAND_SCALE = 0.3f
 private const val STREET_SCALE = 1.6f
@@ -176,7 +177,7 @@ private fun Context.hasLocationPermission(): Boolean =
 fun MapScreen(
     tokenViewModel: TokenViewModel,
     onViewInAr: (MemorialItem) -> Unit,
-    /** Centre on this spot (e.g. a memorial picked in the List tab) rather than the user's location. */
+    /** Center on this spot (e.g. a memorial picked in the List tab) rather than the user's location. */
     focus: LatLng? = null,
     mapViewModel: MapViewModel = viewModel()
 ) {
@@ -359,10 +360,12 @@ fun MapScreen(
                             title = memorial.message,
                             snippet = memorial.markerSnippet(isOwn),
                             // Own memorials open the manage dialog; others go straight to AR
-                            onInfoWindowClick = { if (isOwn) editingPin = memorial else onViewInAr(memorial) }
-                        ) {
-                            MemorialMarker(memorial.visibility, memorial.offerings, markerScale)
-                        }
+                            onInfoWindowClick = { if (isOwn) editingPin = memorial else onViewInAr(memorial) },
+                            // Drawn with regular Compose UI into the marker bitmap, not onto the map
+                            content = @UiComposable {
+                                MemorialMarker(memorial.visibility, memorial.offerings, markerScale)
+                            }
+                        )
                     }
                 }
             }

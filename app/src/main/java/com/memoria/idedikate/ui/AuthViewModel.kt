@@ -1,16 +1,16 @@
 package com.memoria.idedikate.ui
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import android.util.Log
 
 class AuthViewModel : ViewModel() {
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
-    
+
     private val _isUserLoggedIn = MutableStateFlow(auth.currentUser != null)
     val isUserLoggedIn: StateFlow<Boolean> = _isUserLoggedIn.asStateFlow()
 
@@ -27,7 +27,6 @@ class AuthViewModel : ViewModel() {
 
     override fun onCleared() {
         auth.removeAuthStateListener(authStateListener)
-        super.onCleared()
     }
 
     fun handleGoogleCredential(idToken: String) {
@@ -39,7 +38,6 @@ class AuthViewModel : ViewModel() {
                     _errorMessage.value = null
                 }
                 .addOnFailureListener {
-                    // Handle failure
                     Log.e("AuthViewModel", "Google sign-in failed", it)
                     _errorMessage.value = "Sign in failed: ${it.localizedMessage}"
                 }
@@ -48,7 +46,7 @@ class AuthViewModel : ViewModel() {
             _errorMessage.value = "An error occurred: ${e.localizedMessage}"
         }
     }
-    
+
     fun signOut() {
         try {
             auth.signOut()

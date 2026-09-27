@@ -10,8 +10,8 @@ import androidx.compose.ui.unit.dp
 import com.memoria.idedikate.model.OfferingType
 
 /**
- * Full-colour illustrations for the wallet's offering items, drawn on a 48x48 grid.
- * Render with `Icon(..., tint = Color.Unspecified)` so the colours are kept.
+ * Full-color illustrations for the wallet's offering items, drawn on a 48x48 grid.
+ * Render with `Icon(..., tint = Color.Unspecified)` so the colors are kept.
  */
 object OfferingIcons {
 
@@ -87,7 +87,7 @@ object OfferingIcons {
             path(fill = SolidColor(Color.White), fillAlpha = 0.08f) { roundRect(13f, 5f, 21f, 38f, 4f) }
             // Silver border
             path(stroke = SolidColor(Silver), strokeLineWidth = 1.2f) { roundRect(15.5f, 7.5f, 32.5f, 35.5f, 2.5f) }
-            // Flower emblem: five petals around a centre, with two leaves
+            // Flower emblem: five petals around a center, with two leaves
             path(fill = SolidColor(Leaf)) {
                 moveTo(24f, 17.5f); curveTo(21f, 18.5f, 19.5f, 17.5f, 19f, 16f); curveTo(21f, 15.5f, 23f, 16f, 24f, 17.5f); close()
                 moveTo(24f, 17.5f); curveTo(27f, 18.5f, 28.5f, 17.5f, 29f, 16f); curveTo(27f, 15.5f, 25f, 16f, 24f, 17.5f); close()
@@ -195,7 +195,7 @@ object OfferingIcons {
                 moveTo(24f, 32f); curveTo(19f, 31f, 17f, 28f, 17.5f, 26f); curveTo(20.5f, 26.5f, 23f, 29f, 24f, 32f); close()
                 moveTo(24f, 32f); curveTo(29f, 31f, 31f, 28f, 30.5f, 26f); curveTo(27.5f, 26.5f, 25f, 29f, 24f, 32f); close()
             }
-            // Blooms: five petals around a golden centre
+            // Blooms: five petals around a golden center
             bloom(24f, 13f, Petal)
             bloom(14f, 18f, BloomPink)
             bloom(34f, 18f, BloomLavender)

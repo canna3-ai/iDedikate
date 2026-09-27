@@ -163,7 +163,6 @@ class MapViewModel : ViewModel() {
         auth.removeAuthStateListener(authStateListener)
         registrations.forEach { it.remove() }
         listRegistrations.forEach { it.remove() }
-        super.onCleared()
     }
 
     private fun listenForList(uid: String?) {

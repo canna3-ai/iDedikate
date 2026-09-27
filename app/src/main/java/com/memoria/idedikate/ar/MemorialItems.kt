@@ -4,7 +4,6 @@ import android.util.Log
 import androidx.compose.ui.graphics.Color
 import com.google.android.filament.Engine
 import com.google.android.filament.Texture
-import com.memoria.idedikate.ads.RewardAdType
 import com.memoria.idedikate.model.MemorialOfferings
 import io.github.sceneview.loaders.MaterialLoader
 import io.github.sceneview.math.Position
@@ -19,14 +18,14 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-enum class MemorialItemType(val rewardAdType: RewardAdType) {
-    PLAQUE(RewardAdType.REWARDED_DISPLAY),
-    INCENSE_STICK(RewardAdType.REWARDED_INCENSE),
-    INCENSE_POT(RewardAdType.REWARDED_INCENSE),
-    INCENSE_BOX(RewardAdType.REWARDED_INCENSE),
-    INCENSE_PAPER(RewardAdType.REWARDED_INCENSE),
-    CANDLE(RewardAdType.REWARDED_CANDLES),
-    FLOWER(RewardAdType.REWARDED_FLOWERS)
+enum class MemorialItemType {
+    PLAQUE,
+    INCENSE_STICK,
+    INCENSE_POT,
+    INCENSE_BOX,
+    INCENSE_PAPER,
+    CANDLE,
+    FLOWER
 }
 
 data class Offset(
@@ -39,7 +38,7 @@ data class Offset(
 
 /**
  * Procedural memorial offerings built from SceneView primitives.
- * Every builder returns a node whose origin is at the base centre of the item.
+ * Every builder returns a node whose origin is at the base center of the item.
  * Material instances are owned by [MaterialLoader] and released when it is destroyed.
  */
 object MemorialItems {
@@ -121,7 +120,7 @@ object MemorialItems {
         }
     }
 
-    /** Builds a single incense stick, ~25cm, origin at base centre. */
+    /** Builds a single incense stick, ~25cm, origin at base center. */
     fun incenseStick(engine: Engine, materialLoader: MaterialLoader): Node {
         val tan = materialLoader.createColorInstance(Color(0.55f, 0.35f, 0.18f))
         val brown = materialLoader.createColorInstance(Color(0.38f, 0.20f, 0.10f))

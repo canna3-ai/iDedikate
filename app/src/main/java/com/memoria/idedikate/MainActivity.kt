@@ -1,106 +1,104 @@
 package com.memoria.idedikate
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.fragment.app.FragmentActivity
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.*
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.android.gms.ads.MobileAds
-import com.memoria.idedikate.ui.MapScreen
-import com.memoria.idedikate.ui.ARScreen
-import com.memoria.idedikate.ui.theme.IDedikateTheme
-import kotlinx.serialization.Serializable
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material3.Button
-import androidx.compose.ui.platform.LocalContext
-import com.memoria.idedikate.ads.RewardedAdHelper
-import com.memoria.idedikate.ads.RewardAdType
-import com.memoria.idedikate.ads.BannerAdView
-import androidx.compose.runtime.remember
-import android.app.Activity
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-
-import android.widget.Toast
-import com.memoria.idedikate.ui.LoginScreen
-import com.memoria.idedikate.ui.AuthViewModel
-import com.memoria.idedikate.ui.OfferingIcons
-import com.memoria.idedikate.ui.MemorialListScreen
-import com.memoria.idedikate.model.MemorialItem
 import com.google.android.gms.maps.model.LatLng
-import androidx.compose.ui.graphics.Color
-import com.memoria.idedikate.model.ArMemorial
-import com.memoria.idedikate.model.toArMemorial
-import androidx.compose.ui.res.stringResource
-import androidx.credentials.CredentialManager
-import androidx.credentials.GetCredentialRequest
-import androidx.credentials.exceptions.GetCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
-import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
-import android.util.Log
-import androidx.credentials.CustomCredential
-import androidx.credentials.exceptions.GetCredentialCancellationException
-import androidx.credentials.exceptions.NoCredentialException
-import android.content.Context
-import android.content.ContextWrapper
+import com.memoria.idedikate.ads.BannerAdView
+import com.memoria.idedikate.ads.RewardAdType
+import com.memoria.idedikate.ads.RewardedAdHelper
+import com.memoria.idedikate.model.ArMemorial
+import com.memoria.idedikate.model.MemorialItem
+import com.memoria.idedikate.model.toArMemorial
+import com.memoria.idedikate.ui.ARScreen
+import com.memoria.idedikate.ui.AuthViewModel
+import com.memoria.idedikate.ui.LoginScreen
+import com.memoria.idedikate.ui.MapScreen
+import com.memoria.idedikate.ui.MemorialListScreen
+import com.memoria.idedikate.ui.OfferingIcons
+import com.memoria.idedikate.ui.theme.IDedikateTheme
 import kotlin.coroutines.cancellation.CancellationException
-import androidx.credentials.ClearCredentialStateRequest
-import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 
+/** [focusLatitude]/[focusLongitude]: a memorial to center on (from the List tab); null centers on the user. */
 @Serializable
-/** [focusLatitude]/[focusLongitude]: a memorial to centre on (from the List tab); null centres on the user. */
 data class MapRoute(val focusLatitude: Double? = null, val focusLongitude: Double? = null) : NavKey {
     val focus: LatLng? get() = if (focusLatitude != null && focusLongitude != null) LatLng(focusLatitude, focusLongitude) else null
 }
 
-@Serializable
 /** [memorial] is the memorial chosen on the map; null when opened from the tab bar. */
+@Serializable
 data class ARRoute(val memorial: ArMemorial? = null) : NavKey
 
 @Serializable
@@ -126,7 +124,7 @@ class MainActivity : FragmentActivity() {
 @Composable
 fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: AuthViewModel = viewModel()) {
     val isUserLoggedIn by authViewModel.isUserLoggedIn.collectAsState()
-    
+
     if (!isUserLoggedIn) {
         val context = LocalContext.current
         val coroutineScope = rememberCoroutineScope()
@@ -140,12 +138,12 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                 coroutineScope.launch {
                     try {
                         val credentialManager = CredentialManager.create(context)
-                        
+
                         val googleIdOption = GetGoogleIdOption.Builder()
                             .setFilterByAuthorizedAccounts(false)
                             .setServerClientId(webClientId)
                             .build()
-                            
+
                         val request = GetCredentialRequest.Builder()
                             .addCredentialOption(googleIdOption)
                             .build()
@@ -154,12 +152,12 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                             request = request,
                             context = context
                         )
-                        
+
                         val credential = result.credential
-                        
+
                         if (credential is CustomCredential &&
                             credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                            
+
                             val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
                             authViewModel.handleGoogleCredential(googleIdTokenCredential.idToken)
                         } else {
@@ -183,10 +181,10 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                     }
                 }
             },
-            onFacebookSignInClick = { 
+            onFacebookSignInClick = {
                 Toast.makeText(context, "Facebook Sign In coming soon", Toast.LENGTH_SHORT).show()
             },
-            onAppleSignInClick = { 
+            onAppleSignInClick = {
                 Toast.makeText(context, "Apple Sign In coming soon", Toast.LENGTH_SHORT).show()
             }
         )
@@ -393,7 +391,7 @@ fun WalletScreen(tokenViewModel: TokenViewModel) {
                             imageVector = item.icon,
                             contentDescription = item.name,
                             modifier = Modifier.size(if (item.isIllustration) 52.dp else 40.dp),
-                            // Illustrations keep their own colours; plain icons follow the theme
+                            // Illustrations keep their own colors; plain icons follow the theme
                             tint = if (item.isIllustration) Color.Unspecified else MaterialTheme.colorScheme.primary
                         )
                     }
@@ -438,6 +436,6 @@ data class InventoryItem(
     val icon: ImageVector,
     val adType: RewardAdType,
     val balance: Int,
-    /** Full-colour artwork (see [OfferingIcons]) rather than a single-colour Material icon. */
+    /** Full-color artwork (see [OfferingIcons]) rather than a single-color Material icon. */
     val isIllustration: Boolean = true
 )

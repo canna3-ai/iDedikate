@@ -40,7 +40,7 @@ import com.memoria.idedikate.model.PinVisibility
 import java.text.DateFormat
 import java.util.Date
 
-/** Colour used for a memorial's visibility on its map marker and in the list. */
+/** Color used for a memorial's visibility on its map marker and in the list. */
 fun PinVisibility.color(): Color = when (this) {
     PinVisibility.PUBLIC -> Color(0xFFD32F2F)
     PinVisibility.SHARED -> Color(0xFF2E7D32)

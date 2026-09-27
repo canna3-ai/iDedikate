@@ -11,7 +11,7 @@ import kotlin.math.sqrt
 object GeoMath {
     private const val EARTH_RADIUS_M = 6_371_000.0
 
-    /** Great-circle distance in metres (haversine). */
+    /** Great-circle distance in meters (haversine). */
     fun distanceMeters(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
         val dLat = Math.toRadians(lat2 - lat1)
         val dLng = Math.toRadians(lng2 - lng1)

@@ -65,7 +65,7 @@ private enum class ArMode(val label: String) {
 
 /** Only anchor memorials this close to the viewer; beyond that they'd be too small to see anyway. */
 private const val MAX_AR_DISTANCE_M = 100.0
-/** Localisation must be at least this good before anchoring, or the memorial lands in the wrong spot. */
+/** Localization must be at least this good before anchoring, or the memorial lands in the wrong spot. */
 private const val MAX_HORIZONTAL_ACCURACY_M = 10.0
 private const val MAX_YAW_ACCURACY_DEG = 15.0
 
@@ -300,7 +300,7 @@ private fun ARSceneViewCompose(memorial: ArMemorial, mode: ArMode, onStatusChang
 private class GeoTarget(val latitude: Double, val longitude: Double, val bearingToViewer: Double)
 
 /**
- * One frame of location mode: waits for ARCore to localise the phone precisely, then either tells
+ * One frame of location mode: waits for ARCore to localize the phone precisely, then either tells
  * the user how far away the memorial is, or (once within range) asks [resolveAnchor] to place it.
  */
 private fun updateGeospatial(
@@ -347,7 +347,7 @@ private fun updateGeospatial(
 private fun Earth.EarthState.toMessage(): String = when (this) {
     Earth.EarthState.ENABLED -> ""
     Earth.EarthState.ERROR_NOT_AUTHORIZED ->
-        "Location-based AR isn't authorised for this app. Enable the ARCore API in Google Cloud."
+        "Location-based AR isn't authorized for this app. Enable the ARCore API in Google Cloud."
     Earth.EarthState.ERROR_RESOURCE_EXHAUSTED -> "Location-based AR is busy right now. Try again later."
     Earth.EarthState.ERROR_APK_VERSION_TOO_OLD -> "Please update Google Play Services for AR."
     else -> "Location-based AR isn't available right now. Use \"Place anywhere\" instead."
@@ -357,7 +357,7 @@ private fun TerrainAnchorState.toMessage(): String = when (this) {
     TerrainAnchorState.ERROR_UNSUPPORTED_LOCATION ->
         "Location-based AR isn't supported at this spot. Use \"Place anywhere\" instead."
     TerrainAnchorState.ERROR_NOT_AUTHORIZED ->
-        "Location-based AR isn't authorised for this app. Enable the ARCore API in Google Cloud."
+        "Location-based AR isn't authorized for this app. Enable the ARCore API in Google Cloud."
     else -> "Couldn't place the memorial at its location. Try \"Place anywhere\" instead."
 }
 

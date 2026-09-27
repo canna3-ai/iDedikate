@@ -46,7 +46,7 @@ class MemorialLayoutTest {
     }
 
     @Test
-    fun `plaques are centred`() {
+    fun `plaques are centered`() {
         val layout = MemorialItems.layoutFor(MemorialOfferings(plaques = 3))
 
         assertEquals(0f, layout.offsets(MemorialItemType.PLAQUE).sumOf { it.x.toDouble() }.toFloat(), 1e-4f)
