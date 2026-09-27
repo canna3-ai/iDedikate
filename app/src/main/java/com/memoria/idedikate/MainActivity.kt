@@ -70,6 +70,7 @@ import com.google.android.gms.maps.model.LatLng
 import androidx.compose.ui.graphics.Color
 import com.memoria.idedikate.model.ArMemorial
 import com.memoria.idedikate.model.toArMemorial
+import androidx.compose.ui.res.stringResource
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
@@ -130,7 +131,8 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
         val context = LocalContext.current
         val coroutineScope = rememberCoroutineScope()
         val errorMessage by authViewModel.errorMessage.collectAsState()
-        
+        val webClientId = stringResource(R.string.default_web_client_id)
+
         LoginScreen(
             errorMessage = errorMessage,
             onGoogleSignInClick = {
@@ -141,7 +143,7 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                         
                         val googleIdOption = GetGoogleIdOption.Builder()
                             .setFilterByAuthorizedAccounts(false)
-                            .setServerClientId(context.getString(R.string.default_web_client_id))
+                            .setServerClientId(webClientId)
                             .build()
                             
                         val request = GetCredentialRequest.Builder()
