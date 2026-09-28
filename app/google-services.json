@@ -68,6 +68,14 @@
           }
         },
         {
+          "client_id": "504164998595-le5hqcvift219eqtu6b334v2p0hmhcfe.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.memoria.idedikate",
+            "certificate_hash": "b48a90afe93a9ea22f7c03db34ecbaaaca23c7ca"
+          }
+        },
+        {
           "client_id": "504164998595-vj5v5kd08184u8bcsc3tn46l845d5hhp.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
