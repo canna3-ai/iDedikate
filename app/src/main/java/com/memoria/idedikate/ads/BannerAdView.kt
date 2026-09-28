@@ -1,8 +1,10 @@
 package com.memoria.idedikate.ads
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
@@ -16,7 +18,8 @@ fun BannerAdView(
     adUnitId: String = if (BuildConfig.DEBUG) "ca-app-pub-3940256099942544/6300978111" else "ca-app-pub-7728928885479787/1984855801"
 ) {
     AndroidView(
-        modifier = modifier.fillMaxWidth(),
+        // Reserve the banner's height before an ad loads, so the screen above doesn't shift when it arrives
+        modifier = modifier.fillMaxWidth().height(AdSize.BANNER.height.dp),
         factory = { context ->
             AdView(context).apply {
                 setAdSize(AdSize.BANNER)
