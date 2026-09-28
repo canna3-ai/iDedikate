@@ -11,25 +11,21 @@ import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 import com.google.android.gms.ads.rewarded.ServerSideVerificationOptions
 import com.google.firebase.auth.FirebaseAuth
-import com.memoria.idedikate.BuildConfig
-
-// Google's sample ad units: always fill, and clicking them never risks the AdMob account
-private const val TEST_REWARDED_AD_UNIT_ID = "ca-app-pub-3940256099942544/5224354917"
 
 /**
- * @param configuredRewardAmount what one completed ad credits to the wallet. firestore.rules only
- * accepts exactly this amount, so it is the source of truth; keep it in sync with the ad unit's
- * reward in AdMob and with the rules.
+ * @param adUnitId used in every build: rewards are credited by AdMob's server-side verification
+ * callback (functions/index.js), which Google's sample ad units never send. Debug builds get test
+ * ads on these units by registering the phone as a test device (see MainActivity).
+ * @param configuredRewardAmount what one completed ad credits to the wallet. The Cloud Function
+ * is the source of truth (it maps each ad unit to its reward); keep this, the function and the
+ * ad unit's reward in AdMob in sync.
  */
-enum class RewardAdType(private val productionAdUnitId: String, val configuredRewardAmount: Int) {
+enum class RewardAdType(val adUnitId: String, val configuredRewardAmount: Int) {
     REWARDED_TOKENS("ca-app-pub-7728928885479787/5204992073", configuredRewardAmount = 1),
     REWARDED_DISPLAY("ca-app-pub-7728928885479787/6326502052", configuredRewardAmount = 1),
     REWARDED_INCENSE("ca-app-pub-7728928885479787/6763731739", configuredRewardAmount = 5),
     REWARDED_FLOWERS("ca-app-pub-7728928885479787/2455539800", configuredRewardAmount = 2),
-    REWARDED_CANDLES("ca-app-pub-7728928885479787/1912614324", configuredRewardAmount = 2);
-
-    val adUnitId: String
-        get() = if (BuildConfig.DEBUG) TEST_REWARDED_AD_UNIT_ID else productionAdUnitId
+    REWARDED_CANDLES("ca-app-pub-7728928885479787/1912614324", configuredRewardAmount = 2)
 }
 
 class RewardedAdHelper(context: Context) {
@@ -63,22 +59,25 @@ class RewardedAdHelper(context: Context) {
                     Log.d(tag, "Ad was loaded for ${type.name}.")
                     loadingAds.remove(type)
 
-                    // Setup Server-Side Verification options
-                    FirebaseAuth.getInstance().currentUser?.uid?.let { uid ->
-                        val options = ServerSideVerificationOptions.Builder()
-                            .setUserId(uid)
-                            .setCustomData(type.name)
-                            .build()
-                        ad.setServerSideVerificationOptions(options)
-                    }
+                    // The verification callback credits this user; without it the reward is lost
+                    val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+                    val options = ServerSideVerificationOptions.Builder()
+                        .setUserId(uid)
+                        .setCustomData(type.name)
+                        .build()
+                    ad.setServerSideVerificationOptions(options)
 
                     loadedAds[type] = ad
                 }
             })
     }
 
-    /** Shows the ad for [type]. Returns false (and starts loading) if no ad is ready yet. */
-    fun showAd(activity: Activity, type: RewardAdType, onRewarded: (Int, String) -> Unit): Boolean {
+    /**
+     * Shows the ad for [type]. Returns false (and starts loading) if no ad is ready yet.
+     * [onRewarded] only means the ad was completed: AdMob then calls the Cloud Function, which
+     * credits the wallet a moment later.
+     */
+    fun showAd(activity: Activity, type: RewardAdType, onRewarded: () -> Unit): Boolean {
         // Rewarded ads are single-use; take it out now so a double tap can't show it twice
         val rewardedAd = loadedAds.remove(type)
         if (rewardedAd != null) {
@@ -99,15 +98,11 @@ class RewardedAdHelper(context: Context) {
             }
 
             rewardedAd.show(activity) { rewardItem ->
-                // The wallet rules only accept the configured amount. Google's test unit always
-                // reports 10, so only flag a mismatch for our own (production) ad units
-                val rewardAmount = type.configuredRewardAmount
-                val rewardItemType = rewardItem.type
-                if (!BuildConfig.DEBUG && rewardItem.amount != rewardAmount) {
-                    Log.w(tag, "AdMob reward for ${type.name} is ${rewardItem.amount}, but the app credits $rewardAmount. Update AdMob or configuredRewardAmount.")
+                if (rewardItem.amount != type.configuredRewardAmount) {
+                    Log.w(tag, "AdMob reward for ${type.name} is ${rewardItem.amount}, but the app credits ${type.configuredRewardAmount}. Update AdMob or configuredRewardAmount.")
                 }
-                Log.d(tag, "User earned the reward. Amount: $rewardAmount (ad reported ${rewardItem.amount}), Type: $rewardItemType")
-                onRewarded(rewardAmount, rewardItemType)
+                Log.d(tag, "User earned the reward for ${type.name}; waiting for server-side verification")
+                onRewarded()
             }
             return true
         } else {

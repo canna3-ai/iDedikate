@@ -23,7 +23,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Comma-separated AdMob test device IDs (logged by the Ads SDK on first ad request), e.g.
+            // admobTestDeviceIds=ABC123 in ~/.gradle/gradle.properties. Emulators are test devices already.
+            val testDeviceIds = providers.gradleProperty("admobTestDeviceIds").getOrElse("")
+            buildConfigField("String", "ADMOB_TEST_DEVICE_IDS", "\"$testDeviceIds\"")
+        }
         release {
+            buildConfigField("String", "ADMOB_TEST_DEVICE_IDS", "\"\"")
             optimization {
                 enable = true
             }

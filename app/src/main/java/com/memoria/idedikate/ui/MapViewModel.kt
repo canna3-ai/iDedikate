@@ -63,7 +63,13 @@ class MapViewModel : ViewModel() {
         auth.addAuthStateListener(authStateListener)
     }
 
-    /** Live-loads visible pins inside [bounds]. Firestore only allows a range filter on one field, so longitude is filtered locally. */
+    /** The map asks for location once per app session, not every time the Map tab opens. */
+    var locationPermissionRequested = false
+
+    /**
+     * Live-loads visible pins inside [bounds], filtering both latitude and longitude in the query so
+     * the per-query limit only counts pins that are actually on screen.
+     */
     fun setVisibleBounds(bounds: LatLngBounds) {
         val uid = currentUid ?: return
         if (uid != loadedForUid) stopListening()
@@ -71,18 +77,33 @@ class MapViewModel : ViewModel() {
         registrations.clear()
         loadedForUid = uid
 
-        listen(SOURCE_PUBLIC, collection.whereEqualTo(FIELD_VISIBILITY, PinVisibility.PUBLIC.firestoreValue), bounds)
-        listen(SOURCE_OWN, collection.whereEqualTo(FIELD_OWNER_UID, uid), bounds)
-        currentEmail?.let { email ->
-            listen(SOURCE_SHARED, collection.whereArrayContains(FIELD_SHARED_WITH, email), bounds)
+        // Bounds crossing the antimeridian have west > east: query each side of it separately
+        val west = bounds.southwest.longitude
+        val east = bounds.northeast.longitude
+        val longitudeRanges = if (west <= east) listOf(west to east) else listOf(west to 180.0, -180.0 to east)
+        val audiences = buildList {
+            add(SOURCE_PUBLIC to collection.whereEqualTo(FIELD_VISIBILITY, PinVisibility.PUBLIC.firestoreValue))
+            add(SOURCE_OWN to collection.whereEqualTo(FIELD_OWNER_UID, uid))
+            currentEmail?.let { email -> add(SOURCE_SHARED to collection.whereArrayContains(FIELD_SHARED_WITH, email)) }
         }
+        val sources = mutableSetOf<String>()
+        for ((audience, query) in audiences) {
+            longitudeRanges.forEachIndexed { i, (fromLng, toLng) ->
+                val source = "$audience-$i"
+                sources += source
+                listen(source, query, bounds.southwest.latitude, bounds.northeast.latitude, fromLng, toLng)
+            }
+        }
+        // Keep showing the previous pins until the new queries answer, except from queries that are gone
+        if (results.keys.retainAll(sources)) publish()
     }
 
     /**
      * Creates a memorial and pays for it (1 token + its [offerings]) in one batched write, so one
      * can't happen without the other; the rules check the deduction against the memorial. The
      * listeners show both changes immediately, and Firestore rolls them back locally if the
-     * server rejects the batch, in which case [onFailure] fires.
+     * server rejects the batch, in which case [onFailure] fires. [onSuccess] fires once the
+     * server has accepted it (so not while offline).
      */
     fun placeMemorial(
         latLng: LatLng,
@@ -90,6 +111,7 @@ class MapViewModel : ViewModel() {
         visibility: PinVisibility,
         sharedWith: List<String>,
         offerings: MemorialOfferings,
+        onSuccess: () -> Unit,
         onFailure: (Exception) -> Unit
     ) {
         val uid = currentUid
@@ -120,6 +142,7 @@ class MapViewModel : ViewModel() {
             .set(memorialRef, memorial)
             .update(Wallet.ref(db, uid), payment)
             .commit()
+            .addOnSuccessListener { onSuccess() }
             .addOnFailureListener { e ->
                 Log.e(TAG, "Failed to place memorial", e)
                 onFailure(e)
@@ -193,10 +216,12 @@ class MapViewModel : ViewModel() {
                 .sortedByDescending { if (it.createdAtMillis == 0L) Long.MAX_VALUE else it.createdAtMillis }
         }
 
-    private fun listen(source: String, query: Query, bounds: LatLngBounds) {
+    private fun listen(source: String, query: Query, south: Double, north: Double, west: Double, east: Double) {
         registrations += query
-            .whereGreaterThanOrEqualTo(FIELD_LATITUDE, bounds.southwest.latitude)
-            .whereLessThanOrEqualTo(FIELD_LATITUDE, bounds.northeast.latitude)
+            .whereGreaterThanOrEqualTo(FIELD_LATITUDE, south)
+            .whereLessThanOrEqualTo(FIELD_LATITUDE, north)
+            .whereGreaterThanOrEqualTo(FIELD_LONGITUDE, west)
+            .whereLessThanOrEqualTo(FIELD_LONGITUDE, east)
             .limit(MAX_PINS_PER_QUERY)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -209,7 +234,6 @@ class MapViewModel : ViewModel() {
                 results[source] = snapshot?.documents
                     .orEmpty()
                     .mapNotNull { it.toMemorialItem() }
-                    .filter { bounds.containsLongitude(it.longitude) }
                 publish()
             }
     }
@@ -249,13 +273,6 @@ class MapViewModel : ViewModel() {
             offerings = MemorialOfferings.fromFirestore(get(FIELD_OFFERINGS) as? Map<*, *>),
             createdAtMillis = getTimestamp(FIELD_CREATED_AT)?.toDate()?.time ?: 0
         )
-    }
-
-    private fun LatLngBounds.containsLongitude(lng: Double): Boolean {
-        val west = southwest.longitude
-        val east = northeast.longitude
-        // Bounds crossing the antimeridian have west > east
-        return if (west <= east) lng in west..east else lng >= west || lng <= east
     }
 
     private companion object {

@@ -71,6 +71,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.RequestConfiguration
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -110,6 +111,12 @@ data object WalletRoute : NavKey
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (BuildConfig.DEBUG) {
+            // Debug builds use the real rewarded ad units (rewards need AdMob's verification
+            // callback), so they must be marked as test devices to get test ads
+            val testDeviceIds = BuildConfig.ADMOB_TEST_DEVICE_IDS.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            MobileAds.setRequestConfiguration(RequestConfiguration.Builder().setTestDeviceIds(testDeviceIds).build())
+        }
         MobileAds.initialize(this) {}
         enableEdgeToEdge()
         setContent {
@@ -194,8 +201,10 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
     val backStack = rememberNavBackStack(MapRoute())
     val context = LocalContext.current
     val activity = context.findActivity()
+    // Created once per signed-in session, so ads preloaded here survive switching tabs
+    val adHelper = remember { RewardedAdHelper(context) }
+    // Pushed on top of the current screen, so Back returns to the map or list it was opened from
     val openInAr: (MemorialItem) -> Unit = { memorial ->
-        backStack.clear()
         backStack.add(ARRoute(memorial.toArMemorial()))
     }
     val coroutineScope = rememberCoroutineScope()
@@ -313,12 +322,11 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                                 MemorialListScreen(
                                     onViewInAr = openInAr,
                                     onShowOnMap = { memorial ->
-                                        backStack.clear()
                                         backStack.add(MapRoute(memorial.latitude, memorial.longitude))
                                     }
                                 )
                             }
-                            is WalletRoute -> NavEntry(key) { WalletScreen(tokenViewModel) }
+                            is WalletRoute -> NavEntry(key) { WalletScreen(tokenViewModel, adHelper) }
                             else -> error("Unknown route: $key")
                         }
                     }
@@ -331,7 +339,7 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
 
 
 @Composable
-fun WalletScreen(tokenViewModel: TokenViewModel) {
+fun WalletScreen(tokenViewModel: TokenViewModel, adHelper: RewardedAdHelper) {
     val tokens by tokenViewModel.tokens.collectAsState()
     val plaques by tokenViewModel.plaques.collectAsState()
     val incense by tokenViewModel.incenseSticks.collectAsState()
@@ -339,7 +347,6 @@ fun WalletScreen(tokenViewModel: TokenViewModel) {
     val candles by tokenViewModel.candles.collectAsState()
 
     val context = LocalContext.current
-    val adHelper = remember { RewardedAdHelper(context) }
 
     val inventoryItems = listOf(
         InventoryItem("General Tokens", Icons.Default.Star, RewardAdType.REWARDED_TOKENS, tokens, isIllustration = false),
@@ -407,10 +414,9 @@ fun WalletScreen(tokenViewModel: TokenViewModel) {
                     Button(
                         onClick = {
                             val activity = context.findActivity() ?: return@Button
-                            val shown = adHelper.showAd(activity, item.adType) { _, _ ->
-                                tokenViewModel.addReward(item.adType) { e ->
-                                    Toast.makeText(context, "Couldn't save your reward: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-                                }
+                            val shown = adHelper.showAd(activity, item.adType) {
+                                // AdMob verifies the view with our server, which then credits the wallet
+                                Toast.makeText(context, "Reward earned! +${item.adType.configuredRewardAmount} ${item.name} will appear in your wallet shortly.", Toast.LENGTH_LONG).show()
                             }
                             if (!shown) {
                                 Toast.makeText(context, "Ad not ready yet, please try again shortly", Toast.LENGTH_SHORT).show()

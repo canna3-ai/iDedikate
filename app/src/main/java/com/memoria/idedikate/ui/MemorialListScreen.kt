@@ -158,6 +158,6 @@ private fun visibilityText(memorial: MemorialItem, isOwn: Boolean): String = whe
     else -> memorial.visibility.label
 }
 
-private fun placedText(memorial: MemorialItem): String =
+internal fun placedText(memorial: MemorialItem): String =
     if (memorial.createdAtMillis == 0L) "Placing…"
     else "Placed " + DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(memorial.createdAtMillis))

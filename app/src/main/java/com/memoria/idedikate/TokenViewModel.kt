@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentReference
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.memoria.idedikate.ads.RewardAdType
@@ -20,14 +19,16 @@ import kotlinx.coroutines.flow.stateIn
 
 /**
  * The signed-in user's wallet, stored in Firestore at `wallets/{uid}` so it follows the account
- * across devices. Firestore's cache keeps it usable offline, and firestore.rules validates every
- * change (reward amounts, rate limit, memorial costs).
+ * across devices. Firestore's cache keeps it usable offline. Ad rewards are credited only by the
+ * Cloud Function that receives AdMob's verification callback (functions/index.js);
+ * firestore.rules lets the app itself only pay for memorials.
  */
 class TokenViewModel : ViewModel() {
     private val auth = FirebaseAuth.getInstance()
     private val db = FirebaseFirestore.getInstance()
     private var registration: ListenerRegistration? = null
     private var listeningUid: String? = null
+    private var migrationRequested = false
 
     private val balances = MutableStateFlow<Map<RewardAdType, Int>>(emptyMap())
 
@@ -56,29 +57,6 @@ class TokenViewModel : ViewModel() {
         auth.addAuthStateListener(authStateListener)
     }
 
-    /**
-     * Credits the configured reward for [type]. The rules only accept exactly that amount, at most
-     * once every 15 seconds, so [onFailure] fires if the write is rejected.
-     */
-    fun addReward(type: RewardAdType, onFailure: (Exception) -> Unit) {
-        val uid = auth.currentUser?.uid
-        if (uid == null) {
-            onFailure(IllegalStateException("Not signed in"))
-            return
-        }
-        Wallet.ref(db, uid)
-            .update(
-                mapOf(
-                    Wallet.field(type) to FieldValue.increment(type.configuredRewardAmount.toLong()),
-                    Wallet.FIELD_LAST_REWARD_AT to FieldValue.serverTimestamp()
-                )
-            )
-            .addOnFailureListener { e ->
-                Log.e(TAG, "Failed to credit ${type.name}", e)
-                onFailure(e)
-            }
-    }
-
     override fun onCleared() {
         auth.removeAuthStateListener(authStateListener)
         registration?.remove()
@@ -89,6 +67,7 @@ class TokenViewModel : ViewModel() {
         registration?.remove()
         registration = null
         listeningUid = uid
+        migrationRequested = false
         balances.value = emptyMap()
         if (uid == null) return
 
@@ -106,8 +85,10 @@ class TokenViewModel : ViewModel() {
                 return@addSnapshotListener
             }
             val data = snapshot.data.orEmpty()
-            // Older wallets store flowers/candles as "fruit"/"food": move them once to the new fields
-            Wallet.legacyMigration(data)?.let { update ->
+            // Older wallets store flowers/candles as "fruit"/"food": move them once to the new fields.
+            // Only try once per sign-in: a rejected write rolls back and fires this listener again
+            Wallet.legacyMigration(data)?.takeIf { !migrationRequested }?.let { update ->
+                migrationRequested = true
                 ref.update(update).addOnFailureListener { e -> Log.e(TAG, "Failed to migrate wallet", e) }
             }
             // Until the migration lands, show the balances from the old field names

@@ -66,19 +66,12 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isOwner();
     }
 
-    // Each user's wallet. Amounts here must match Wallet.kt and RewardAdType.configuredRewardAmount.
+    // Each user's wallet. Amounts here must match Wallet.kt and functions/index.js.
+    // Ad rewards are credited only by the admobRewardCallback Cloud Function (Admin SDK, which
+    // bypasses these rules) after AdMob verifies the ad was watched; the app can't add to balances.
     match /wallets/{uid} {
       function isWalletOwner() {
         return request.auth != null && request.auth.uid == uid;
-      }
-
-      // One completed rewarded ad: exactly one balance goes up by its configured amount,
-      // at most once every 15 seconds (a rewarded ad can't be finished faster than that)
-      function isReward(field, amount) {
-        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([field, 'lastRewardAt'])
-          && request.resource.data[field] == resource.data[field] + amount
-          && request.resource.data.lastRewardAt == request.time
-          && request.time > resource.data.lastRewardAt + duration.value(15, 's');
       }
 
       // Paying for a memorial created in the same batch: 1 token plus exactly its offerings
@@ -127,16 +120,14 @@ service cloud.firestore {
         && request.resource.data.candles == 2
         && request.resource.data.lastRewardAt == request.time;
 
-      allow update: if isWalletOwner()
-        && (isReward('tokens', 1)
-            || isReward('plaques', 1)
-            || isReward('incenseSticks', 5)
-            || isReward('flowers', 2)
-            || isReward('candles', 2)
-            || isMemorialPayment()
-            || isLegacyRename());
+      allow update: if isWalletOwner() && (isMemorialPayment() || isLegacyRename());
 
       allow delete: if false;
+    }
+
+    // Processed AdMob reward transactions (written by the Cloud Function only, to credit each ad once)
+    match /adRewards/{transactionId} {
+      allow read, write: if false;
     }
   }
 }

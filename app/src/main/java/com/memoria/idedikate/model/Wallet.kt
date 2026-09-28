@@ -7,8 +7,8 @@ import com.memoria.idedikate.ads.RewardAdType
 
 /**
  * Layout of the Firestore wallet document `wallets/{uid}`.
- * firestore.rules enforces the same field names, starter balance, reward amounts and memorial cost,
- * so keep the two in sync.
+ * firestore.rules and functions/index.js use the same field names, starter balance and memorial
+ * cost, so keep the three in sync.
  */
 object Wallet {
     const val COLLECTION = "wallets"
@@ -42,11 +42,12 @@ object Wallet {
     /**
      * Wallets created before flowers and candles replaced fruit and food still hold "fruit"/"food".
      * Returns the one-time update that moves those balances to the new fields (allowed by the
-     * rules only in exactly this form), or null if the wallet is already up to date.
+     * rules only in exactly this form: every old field present, no new one), or null if the
+     * wallet is already up to date or doesn't match that form.
      */
     fun legacyMigration(data: Map<String, Any>): Map<String, Any>? {
-        val renames = OfferingType.entries.filter { it.legacyFirestoreKey != null && it.legacyFirestoreKey in data }
-        if (renames.isEmpty() || renames.any { it.firestoreKey in data }) return null
+        val renames = OfferingType.entries.filter { it.legacyFirestoreKey != null }
+        if (renames.any { it.legacyFirestoreKey !in data || it.firestoreKey in data }) return null
         return renames.fold(mapOf()) { update, type ->
             update + mapOf(
                 type.firestoreKey to data.getValue(type.legacyFirestoreKey!!),
