@@ -16,8 +16,8 @@ android {
         applicationId = "com.memoria.idedikate"
         minSdk = 24
         targetSdk = 37
-        versionCode = 5
-        versionName = "2.0.0"
+        versionCode = 6
+        versionName = "2.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -31,8 +31,12 @@ android {
         }
         release {
             buildConfigField("String", "ADMOB_TEST_DEVICE_IDS", "\"\"")
+            proguardFiles("proguard-rules.pro")
             optimization {
                 enable = true
+            }
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
             }
         }
     }
