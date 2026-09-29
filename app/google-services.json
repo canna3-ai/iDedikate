@@ -23,6 +23,14 @@
           }
         },
         {
+          "client_id": "504164998595-mhknb1vcqja979uii56sfm1in3poo490.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.memoria.app",
+            "certificate_hash": "c813b597796beaba6489a39da53051e7db6fc9e6"
+          }
+        },
+        {
           "client_id": "504164998595-qppkmcjgc6gbsq0bhq4j0jo3hb6uqp6g.apps.googleusercontent.com",
           "client_type": 3
         }
@@ -51,6 +59,14 @@
         }
       },
       "oauth_client": [
+        {
+          "client_id": "504164998595-76b4381nppgcgqrlgddr223b89bujtjl.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.memoria.idedikate",
+            "certificate_hash": "c813b597796beaba6489a39da53051e7db6fc9e6"
+          }
+        },
         {
           "client_id": "504164998595-dbpevdgbvnt53vrif79h4v92l8sd3s79.apps.googleusercontent.com",
           "client_type": 1,
