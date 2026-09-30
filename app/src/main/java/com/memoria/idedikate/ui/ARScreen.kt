@@ -78,7 +78,7 @@ fun ARScreen(memorial: ArMemorial?) {
         // Opened from the tab bar: there's nothing to place until a memorial is chosen on the map
         Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
             Text(
-                "Choose a memorial on the Map, then tap \"View in AR\" to place it here.",
+                "Choose a memorial on the Memorials tab or the Map, then tap \"View in AR\" to see it here.",
                 textAlign = TextAlign.Center
             )
         }

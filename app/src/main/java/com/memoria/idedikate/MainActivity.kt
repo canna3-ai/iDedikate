@@ -22,10 +22,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
@@ -47,6 +48,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -57,6 +59,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
@@ -86,13 +90,15 @@ import com.memoria.idedikate.ui.AuthViewModel
 import com.memoria.idedikate.ui.LoginScreen
 import com.memoria.idedikate.ui.MapScreen
 import com.memoria.idedikate.ui.MemorialListScreen
+import com.memoria.idedikate.ui.Onboarding
+import com.memoria.idedikate.ui.OnboardingScreen
 import com.memoria.idedikate.ui.OfferingIcons
 import com.memoria.idedikate.ui.theme.IDedikateTheme
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
-/** [focusLatitude]/[focusLongitude]: a memorial to center on (from the List tab); null centers on the user. */
+/** [focusLatitude]/[focusLongitude]: a memorial to center on (from the Memorials tab); null centers on the user. */
 @Serializable
 data class MapRoute(val focusLatitude: Double? = null, val focusLongitude: Double? = null) : NavKey {
     val focus: LatLng? get() = if (focusLatitude != null && focusLongitude != null) LatLng(focusLatitude, focusLongitude) else null
@@ -131,9 +137,19 @@ class MainActivity : FragmentActivity() {
 @Composable
 fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: AuthViewModel = viewModel()) {
     val isUserLoggedIn by authViewModel.isUserLoggedIn.collectAsState()
+    val context = LocalContext.current
+    // First launch opens with a short guide to what the app is for, before sign-in or any ads
+    var showGuide by rememberSaveable { mutableStateOf(!Onboarding.isSeen(context)) }
+
+    if (showGuide) {
+        OnboardingScreen(onFinish = {
+            Onboarding.markSeen(context)
+            showGuide = false
+        })
+        return
+    }
 
     if (!isUserLoggedIn) {
-        val context = LocalContext.current
         val coroutineScope = rememberCoroutineScope()
         val errorMessage by authViewModel.errorMessage.collectAsState()
         val webClientId = stringResource(R.string.default_web_client_id)
@@ -198,9 +214,16 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
         return
     }
 
-    val backStack = rememberNavBackStack(MapRoute())
-    val context = LocalContext.current
+    // Home is the Memorials tab: it explains itself to new users (unlike a bare map asking for
+    // location access), and returning users land on their own memorials
+    val backStack = rememberNavBackStack(ListRoute)
     val activity = context.findActivity()
+    // Other tabs sit on top of Home, so Back returns there before leaving the app
+    val selectTab: (NavKey) -> Unit = { route ->
+        backStack.clear()
+        backStack.add(ListRoute)
+        if (route != ListRoute) backStack.add(route)
+    }
     // Created once per signed-in session, so ads preloaded here survive switching tabs
     val adHelper = remember { RewardedAdHelper(context) }
     // Pushed on top of the current screen, so Back returns to the map or list it was opened from
@@ -209,6 +232,17 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
     }
     val coroutineScope = rememberCoroutineScope()
     var showSignOutDialog by remember { mutableStateOf(false) }
+    var showHelp by rememberSaveable { mutableStateOf(false) }
+
+    if (showHelp) {
+        // Over the current screen rather than replacing it, so tabs and preloaded ads survive
+        Dialog(
+            onDismissRequest = { showHelp = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            OnboardingScreen(onFinish = { showHelp = false })
+        }
+    }
 
     if (showSignOutDialog) {
         AlertDialog(
@@ -242,8 +276,11 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
         modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("iDedikate Dashboard") },
+                title = { Text("iDedikate") },
                 actions = {
+                    IconButton(onClick = { showHelp = true }) {
+                        Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = "How iDedikate works")
+                    }
                     IconButton(onClick = { showSignOutDialog = true }) {
                         Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sign out")
                     }
@@ -253,48 +290,29 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
         bottomBar = {
             val currentRoute = backStack.lastOrNull()
             NavigationBar {
+                // Order follows the journey: your memorials, place one, visit it, then earn more
+                NavigationBarItem(
+                    selected = currentRoute is ListRoute,
+                    onClick = { if (currentRoute !is ListRoute) selectTab(ListRoute) },
+                    icon = { Icon(Icons.Default.Home, contentDescription = null) },
+                    label = { Text("Memorials") }
+                )
                 NavigationBarItem(
                     selected = currentRoute is MapRoute,
-                    onClick = {
-                        if (currentRoute !is MapRoute) {
-                            backStack.clear()
-                            backStack.add(MapRoute())
-                        }
-                    },
-                    icon = { Icon(Icons.Default.Map, contentDescription = "Map") },
+                    onClick = { if (currentRoute !is MapRoute) selectTab(MapRoute()) },
+                    icon = { Icon(Icons.Default.Map, contentDescription = null) },
                     label = { Text("Map") }
                 )
                 NavigationBarItem(
                     selected = currentRoute is ARRoute,
-                    onClick = {
-                        if (currentRoute !is ARRoute) {
-                            backStack.clear()
-                            backStack.add(ARRoute())
-                        }
-                    },
-                    icon = { Icon(Icons.Default.CameraAlt, contentDescription = "AR") },
-                    label = { Text("AR") }
-                )
-                NavigationBarItem(
-                    selected = currentRoute is ListRoute,
-                    onClick = {
-                        if (currentRoute !is ListRoute) {
-                            backStack.clear()
-                            backStack.add(ListRoute)
-                        }
-                    },
-                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "List") },
-                    label = { Text("List") }
+                    onClick = { if (currentRoute !is ARRoute) selectTab(ARRoute()) },
+                    icon = { Icon(Icons.Default.CameraAlt, contentDescription = null) },
+                    label = { Text("AR View") }
                 )
                 NavigationBarItem(
                     selected = currentRoute is WalletRoute,
-                    onClick = {
-                        if (currentRoute !is WalletRoute) {
-                            backStack.clear()
-                            backStack.add(WalletRoute)
-                        }
-                    },
-                    icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = "Wallet") },
+                    onClick = { if (currentRoute !is WalletRoute) selectTab(WalletRoute) },
+                    icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = null) },
                     label = { Text("Wallet") }
                 )
             }
@@ -323,7 +341,9 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                                     onViewInAr = openInAr,
                                     onShowOnMap = { memorial ->
                                         backStack.add(MapRoute(memorial.latitude, memorial.longitude))
-                                    }
+                                    },
+                                    onPlaceMemorial = { selectTab(MapRoute()) },
+                                    onShowGuide = { showHelp = true }
                                 )
                             }
                             is WalletRoute -> NavEntry(key) { WalletScreen(tokenViewModel, adHelper) }
@@ -332,7 +352,8 @@ fun MainScreen(tokenViewModel: TokenViewModel = viewModel(), authViewModel: Auth
                     }
                 )
             }
-            BannerAdView()
+            // Not on Home, so a new user's first screen is about their memorials rather than an ad
+            if (backStack.lastOrNull() !is ListRoute) BannerAdView()
         }
     }
 }

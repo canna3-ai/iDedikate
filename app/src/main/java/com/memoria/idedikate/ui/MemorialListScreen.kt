@@ -15,16 +15,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddLocationAlt
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.ViewInAr
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,23 +53,23 @@ fun PinVisibility.color(): Color = when (this) {
     PinVisibility.PRIVATE -> Color(0xFF7B1FA2)
 }
 
-/** The user's memorials and those shared with them, anywhere (the map only loads the visible area). */
+/**
+ * Home: the user's memorials and those shared with them, anywhere (the map only loads the visible
+ * area). With none yet, it welcomes the user and points them at placing their first one.
+ */
 @Composable
 fun MemorialListScreen(
     onViewInAr: (MemorialItem) -> Unit,
     onShowOnMap: (MemorialItem) -> Unit,
+    onPlaceMemorial: () -> Unit,
+    onShowGuide: () -> Unit,
     mapViewModel: MapViewModel = viewModel()
 ) {
     val mine by mapViewModel.myMemorials.collectAsState()
     val shared by mapViewModel.sharedWithMe.collectAsState()
 
     if (mine.isEmpty() && shared.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-            Text(
-                "No memorials yet. Place one from the Map tab with \"Place memorial\".",
-                textAlign = TextAlign.Center
-            )
-        }
+        WelcomeState(onPlaceMemorial = onPlaceMemorial, onShowGuide = onShowGuide)
         return
     }
 
@@ -72,7 +78,16 @@ fun MemorialListScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxSize()
     ) {
-        item { SectionHeader("My memorials (${mine.size})") }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.weight(1f)) { SectionHeader("My memorials (${mine.size})") }
+                FilledTonalButton(onClick = onPlaceMemorial) {
+                    Icon(Icons.Default.AddLocationAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Place memorial")
+                }
+            }
+        }
         if (mine.isEmpty()) {
             item { Text("You haven't placed any memorials yet.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
@@ -86,6 +101,47 @@ fun MemorialListScreen(
                 MemorialCard(memorial, isOwn = false, onViewInAr = onViewInAr, onShowOnMap = onShowOnMap)
             }
         }
+    }
+}
+
+@Composable
+private fun WelcomeState(onPlaceMemorial: () -> Unit, onShowGuide: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(32.dp)
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            listOf(OfferingIcons.IncenseStick, OfferingIcons.MemorialPlaque, OfferingIcons.Flowers, OfferingIcons.Candle).forEach {
+                Icon(it, contentDescription = null, tint = Color.Unspecified, modifier = Modifier.size(56.dp))
+            }
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            "Create your first memorial",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            "Choose a place that meant something to your loved one, leave offerings of incense, " +
+                "lilies and candles, and visit it in AR whenever you want to remember them.",
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(28.dp))
+        Button(onClick = onPlaceMemorial) {
+            Icon(Icons.Default.AddLocationAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Place a memorial")
+        }
+        TextButton(onClick = onShowGuide) { Text("How iDedikate works") }
     }
 }
 

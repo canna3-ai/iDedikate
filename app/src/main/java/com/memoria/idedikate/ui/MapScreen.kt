@@ -246,7 +246,7 @@ private fun Context.hasLocationPermission(): Boolean =
 fun MapScreen(
     tokenViewModel: TokenViewModel,
     onViewInAr: (MemorialItem) -> Unit,
-    /** Center on this spot (e.g. a memorial picked in the List tab) rather than the user's location. */
+    /** Center on this spot (e.g. a memorial picked in the Memorials tab) rather than the user's location. */
     focus: LatLng? = null,
     mapViewModel: MapViewModel = viewModel()
 ) {

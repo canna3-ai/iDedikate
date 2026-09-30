@@ -13,3 +13,10 @@
     public static ** INSTANCE;
 }
 -keep @kotlinx.serialization.Serializable class com.memoria.idedikate.** { *; }
+
+# ARCore's Geospatial API reaches the Fused Location Provider from native code (JNI), which R8
+# can't see: without these, R8 strips or renames the classes and enabling GeospatialMode throws
+# GooglePlayServicesLocationLibraryNotLinkedException in release builds.
+-keep class com.google.android.gms.location.** { *; }
+-keep class com.google.android.gms.tasks.** { *; }
+-keep class com.google.android.gms.common.api.** { *; }

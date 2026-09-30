@@ -40,7 +40,7 @@ class MapViewModel : ViewModel() {
     private val _syncError = MutableStateFlow<String?>(null)
     val syncError: StateFlow<String?> = _syncError.asStateFlow()
 
-    // List tab: all of the user's memorials and those shared with them, not limited to the map area
+    // Memorials tab: all of the user's memorials and those shared with them, not limited to the map area
     private val listRegistrations = mutableListOf<ListenerRegistration>()
     private var listUid: String? = null
 
