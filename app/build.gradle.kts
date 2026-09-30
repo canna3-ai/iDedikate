@@ -16,8 +16,8 @@ android {
         applicationId = "com.memoria.idedikate"
         minSdk = 24
         targetSdk = 37
-        versionCode = 9
-        versionName = "2.0.4"
+        versionCode = 10
+        versionName = "3.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
