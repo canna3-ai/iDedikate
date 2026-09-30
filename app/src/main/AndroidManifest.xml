@@ -23,6 +23,11 @@
             android:name="com.google.android.geo.API_KEY"
             android:value="${MAPS_API_KEY}" />
 
+        <!-- ARCore Geospatial API auth; the key must have ARCore API in its API restrictions -->
+        <meta-data
+            android:name="com.google.android.ar.API_KEY"
+            android:value="${MAPS_API_KEY}" />
+
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-7728928885479787~7757249202"/>
