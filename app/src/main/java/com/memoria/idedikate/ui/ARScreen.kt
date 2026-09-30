@@ -17,9 +17,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -125,10 +125,9 @@ fun ARScreen(memorial: ArMemorial?) {
     var status by remember { mutableStateOf("") }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // A fresh AR session per mode keeps each mode's anchors and configuration separate
-        key(mode) {
-            ARSceneViewCompose(memorial = memorial, mode = mode, onStatusChange = { status = it })
-        }
+        // One AR session for both modes: SceneView closes a discarded session on a background thread
+        // without pausing it, so starting a new one alongside it crashes ARCore's camera teardown
+        ARSceneViewCompose(memorial = memorial, mode = mode, onStatusChange = { status = it })
 
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -165,12 +164,23 @@ fun ARScreen(memorial: ArMemorial?) {
     }
 }
 
-/** Per-session bookkeeping for location mode; plain fields, so per-frame updates don't recompose. */
+/** Per-mode bookkeeping for location mode; plain fields, so per-frame updates don't recompose. */
 private class GeoPlacement {
     var resolving = false
     var node: AnchorNode? = null
     var failed = false
     var lastStatus = ""
+    /** Set once the user switches away, so a terrain anchor still resolving is dropped. */
+    var cancelled = false
+}
+
+/** Session-wide bookkeeping that outlives mode switches. */
+private class SessionState {
+    var geospatialSupported = true
+    /** The mode the session is currently configured for; null until the first frame. */
+    var configuredMode: ArMode? = null
+    /** Nodes from a previous mode, already out of the scene; destroyed with the screen. */
+    val retiredNodes = mutableListOf<AnchorNode>()
 }
 
 @Composable
@@ -181,11 +191,31 @@ private fun ARSceneViewCompose(memorial: ArMemorial, mode: ArMode, onStatusChang
     val layout = remember(memorial) { MemorialItems.layoutFor(memorial.offerings) }
     // Only read inside callbacks, so updating it every frame doesn't recompose
     var frame by remember { mutableStateOf<Frame?>(null) }
-    var hasPlaced by remember { mutableStateOf(false) }
-    var isTrackingPlane by remember { mutableStateOf(false) }
-    var geospatialSupported by remember { mutableStateOf(true) }
     var sessionFailed by remember { mutableStateOf(false) }
-    val geo = remember { GeoPlacement() }
+    val sessionState = remember { SessionState() }
+    // Everything below starts over whenever the mode changes
+    var hasPlaced by remember(mode) { mutableStateOf(false) }
+    var isTrackingPlane by remember(mode) { mutableStateOf(false) }
+    val geo = remember(mode) { GeoPlacement() }
+
+    DisposableEffect(mode) {
+        onDispose {
+            // Leaving this mode: stop anchor resolution and take its memorial out of the scene
+            geo.cancelled = true
+            childNodes.filterIsInstance<AnchorNode>().forEach { node ->
+                runCatching { node.detachAnchor() }
+                sessionState.retiredNodes += node
+            }
+            childNodes.clear()
+        }
+    }
+    DisposableEffect(Unit) {
+        // Registered after the engine, so this runs before the engine is destroyed
+        onDispose {
+            sessionState.retiredNodes.forEach { runCatching { it.destroy() } }
+            sessionState.retiredNodes.clear()
+        }
+    }
 
     fun setStatus(text: String) {
         if (text != geo.lastStatus) {
@@ -222,11 +252,7 @@ private fun ARSceneViewCompose(memorial: ArMemorial, mode: ArMode, onStatusChang
             config.depthMode =
                 if (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) Config.DepthMode.AUTOMATIC
                 else Config.DepthMode.DISABLED
-            if (mode == ArMode.AT_LOCATION) {
-                geospatialSupported = session.isGeospatialModeSupported(Config.GeospatialMode.ENABLED)
-                // Configuring an unsupported mode throws, so only enable it when supported
-                if (geospatialSupported) config.geospatialMode = Config.GeospatialMode.ENABLED
-            }
+            sessionState.geospatialSupported = session.isGeospatialModeSupported(Config.GeospatialMode.ENABLED)
         },
         onSessionFailed = { exception ->
             Log.e("ARScreen", "AR session failed", exception)
@@ -235,9 +261,13 @@ private fun ARSceneViewCompose(memorial: ArMemorial, mode: ArMode, onStatusChang
         },
         onSessionUpdated = { session, updatedFrame ->
             frame = updatedFrame
+            if (sessionState.configuredMode != mode) {
+                sessionState.configuredMode = mode
+                configureGeospatial(session, sessionState, enabled = mode == ArMode.AT_LOCATION)
+            }
             when (mode) {
                 ArMode.AT_LOCATION ->
-                    if (!geospatialSupported) {
+                    if (!sessionState.geospatialSupported) {
                         setStatus("This phone doesn't support location-based AR. Use \"Place anywhere\" instead.")
                     } else {
                         updateGeospatial(session, memorial, geo, ::setStatus) { place ->
@@ -251,7 +281,10 @@ private fun ARSceneViewCompose(memorial: ArMemorial, mode: ArMode, onStatusChang
                                 eusQuaternion = GeoMath.facingQuaternion(place.bearingToViewer)
                             ) { state, node ->
                                 geo.resolving = false
-                                if (node != null) {
+                                if (geo.cancelled) {
+                                    // The user switched modes while this was resolving
+                                    node?.let { runCatching { it.detachAnchor() }; it.destroy() }
+                                } else if (node != null) {
                                     MemorialItems.renderOfferings(engine, materialLoader, node, layout)
                                     childNodes += node
                                     geo.node = node
@@ -294,6 +327,20 @@ private fun ARSceneViewCompose(memorial: ArMemorial, mode: ArMode, onStatusChang
             }
         )
     )
+}
+
+/** Turns the Geospatial API on for location mode and off otherwise, so "Place anywhere" doesn't pay for it. */
+private fun configureGeospatial(session: Session, state: SessionState, enabled: Boolean) {
+    // Configuring an unsupported mode throws, so only enable it when supported
+    val geospatialMode =
+        if (enabled && state.geospatialSupported) Config.GeospatialMode.ENABLED else Config.GeospatialMode.DISABLED
+    val config = session.config
+    if (config.geospatialMode == geospatialMode) return
+    config.geospatialMode = geospatialMode
+    runCatching { session.configure(config) }.onFailure {
+        Log.e("ARScreen", "Couldn't set geospatial mode to $geospatialMode", it)
+        if (geospatialMode == Config.GeospatialMode.ENABLED) state.geospatialSupported = false
+    }
 }
 
 /** Where to anchor a memorial, and which way it should face. */
