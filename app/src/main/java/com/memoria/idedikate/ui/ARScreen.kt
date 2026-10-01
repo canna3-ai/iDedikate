@@ -4,17 +4,25 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
+import android.view.MotionEvent
+import android.view.SurfaceView
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -22,6 +30,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,9 +42,13 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.google.ar.core.Anchor.TerrainAnchorState
 import com.google.ar.core.Config
+import com.google.ar.core.DepthPoint
 import com.google.ar.core.Earth
 import com.google.ar.core.Frame
+import com.google.ar.core.HitResult
 import com.google.ar.core.Plane
+import com.google.ar.core.Point
+import com.google.ar.core.Pose
 import com.google.ar.core.Session
 import com.google.ar.core.TrackingFailureReason
 import com.google.ar.core.TrackingState
@@ -44,6 +58,7 @@ import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException
 import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException
 import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException
+import com.memoria.idedikate.ar.ArPhoto
 import com.memoria.idedikate.ar.GeoMath
 import com.memoria.idedikate.ar.MemorialItems
 import com.memoria.idedikate.model.ArMemorial
@@ -54,6 +69,11 @@ import io.github.sceneview.rememberEngine
 import io.github.sceneview.rememberMaterialLoader
 import io.github.sceneview.rememberNodes
 import io.github.sceneview.rememberOnGestureListener
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** How the memorial is placed in AR. */
 private enum class ArMode(val label: String) {
@@ -68,6 +88,8 @@ private const val MAX_AR_DISTANCE_M = 100.0
 /** Localization must be at least this good before anchoring, or the memorial lands in the wrong spot. */
 private const val MAX_HORIZONTAL_ACCURACY_M = 10.0
 private const val MAX_YAW_ACCURACY_DEG = 15.0
+/** A tap off the detected planes may land on ground this close to level (cosine of the max tilt, ~25°). */
+private const val LEVEL_SURFACE_MIN_UP = 0.9f
 
 private fun Context.has(permission: String) =
     ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
@@ -123,11 +145,19 @@ fun ARScreen(memorial: ArMemorial?) {
         if (locationModeAvailable) mode = ArMode.AT_LOCATION
     }
     var status by remember { mutableStateOf("") }
+    var arView by remember { mutableStateOf<SurfaceView?>(null) }
+    var isSharing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     Box(modifier = Modifier.fillMaxSize()) {
         // One AR session for both modes: SceneView closes a discarded session on a background thread
         // without pausing it, so starting a new one alongside it crashes ARCore's camera teardown
-        ARSceneViewCompose(memorial = memorial, mode = mode, onStatusChange = { status = it })
+        ARSceneViewCompose(
+            memorial = memorial,
+            mode = mode,
+            onStatusChange = { status = it },
+            onArViewChange = { arView = it }
+        )
 
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -151,16 +181,50 @@ fun ARScreen(memorial: ArMemorial?) {
         val hint = if (mode == ArMode.PLACE_ANYWHERE && hasCoordinates && !hasPreciseLocation) {
             "Allow precise location to see this memorial at its real location."
         } else ""
-        Text(
-            text = listOf(status, hint).filter { it.isNotEmpty() }.joinToString("\n"),
-            color = Color.White,
-            textAlign = TextAlign.Center,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(start = 16.dp, end = 16.dp, bottom = 32.dp)
-                .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
-                .padding(16.dp)
-        )
+        ) {
+            arView?.let { view ->
+                ExtendedFloatingActionButton(
+                    text = { Text(if (isSharing) "Preparing photo…" else "Share photo") },
+                    icon = { Icon(Icons.Filled.PhotoCamera, contentDescription = null) },
+                    onClick = {
+                        if (isSharing) return@ExtendedFloatingActionButton
+                        isSharing = true
+                        scope.launch {
+                            try {
+                                val photo = ArPhoto.capture(view)
+                                if (photo == null) {
+                                    Toast.makeText(context, "Couldn't take the photo, please try again", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    ArPhoto.addCaption(photo, memorial.title)
+                                    ArPhoto.share(context, photo, memorial.title)
+                                    photo.recycle()
+                                }
+                            } catch (e: Exception) {
+                                if (e is CancellationException) throw e
+                                Log.e("ARScreen", "Couldn't share AR photo", e)
+                                Toast.makeText(context, "Couldn't share the photo", Toast.LENGTH_SHORT).show()
+                            } finally {
+                                isSharing = false
+                            }
+                        }
+                    }
+                )
+            }
+            Text(
+                text = listOf(status, hint).filter { it.isNotEmpty() }.joinToString("\n"),
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                    .padding(16.dp)
+            )
+        }
     }
 }
 
@@ -184,7 +248,13 @@ private class SessionState {
 }
 
 @Composable
-private fun ARSceneViewCompose(memorial: ArMemorial, mode: ArMode, onStatusChange: (String) -> Unit) {
+private fun ARSceneViewCompose(
+    memorial: ArMemorial,
+    mode: ArMode,
+    onStatusChange: (String) -> Unit,
+    /** Reports the AR view for taking photos, or null once it's gone. */
+    onArViewChange: (SurfaceView?) -> Unit
+) {
     val engine = rememberEngine()
     val materialLoader = rememberMaterialLoader(engine)
     val childNodes = rememberNodes()
@@ -232,6 +302,35 @@ private fun ARSceneViewCompose(memorial: ArMemorial, mode: ArMode, onStatusChang
                 else "Move your phone slowly to find a flat surface"
             )
         }
+    }
+
+    /** Anchors the memorial on the surface under the user's finger, facing them. */
+    fun placeAt(motionEvent: MotionEvent) {
+        val currentFrame = frame ?: return
+        if (currentFrame.camera.trackingState != TrackingState.TRACKING) {
+            return setStatus("Hold on, still getting a sense of the room. Move your phone slowly.")
+        }
+        val hit = runCatching { currentFrame.surfaceHitAt(motionEvent) }
+            .onFailure { Log.w("ARScreen", "Hit test failed", it) }
+            .getOrNull()
+            ?: return setStatus(
+                if (isTrackingPlane) "No flat surface there. Tap on the highlighted area, or move a little closer."
+                else "Still looking for a flat surface. Move your phone slowly."
+            )
+        val anchor = runCatching { hit.trackable.createAnchor(facingCamera(hit.hitPose, currentFrame.camera.pose)) }
+            .onFailure { Log.w("ARScreen", "Couldn't create anchor", it) }
+            .getOrNull()
+            ?: return setStatus("Couldn't place it there, please try again.")
+
+        val anchorNode = AnchorNode(engine = engine, anchor = anchor)
+        MemorialItems.renderOfferings(engine, materialLoader, anchorNode, layout)
+        childNodes += anchorNode
+        hasPlaced = true
+        setStatus("${memorial.title} · ${memorial.offerings.summary()}")
+    }
+    // The gesture listener outlives recompositions, so it calls through this to see the current mode
+    val onTap by rememberUpdatedState<(MotionEvent) -> Unit> { motionEvent ->
+        if (mode == ArMode.PLACE_ANYWHERE && !hasPlaced) placeAt(motionEvent)
     }
 
     if (sessionFailed) {
@@ -311,21 +410,41 @@ private fun ARSceneViewCompose(memorial: ArMemorial, mode: ArMode, onStatusChang
             }
         },
         onGestureListener = rememberOnGestureListener(
-            onSingleTapConfirmed = { motionEvent, node ->
-                if (mode != ArMode.PLACE_ANYWHERE || hasPlaced || node != null) return@rememberOnGestureListener
-                val hit = frame?.hitTest(motionEvent)?.firstOrNull { hitResult ->
-                    val plane = hitResult.trackable as? Plane
-                    plane != null && plane.isPoseInPolygon(hitResult.hitPose)
-                } ?: return@rememberOnGestureListener
-                val anchor = runCatching { hit.createAnchor() }.getOrNull() ?: return@rememberOnGestureListener
+            // Not onSingleTapConfirmed: that waits out the double-tap timeout and is dropped
+            // entirely when the user taps again quickly, so repeated taps never placed anything
+            onSingleTapUp = { motionEvent, _ -> onTap(motionEvent) }
+        ),
+        onViewCreated = { onArViewChange(this) }
+    )
+    DisposableEffect(Unit) {
+        onDispose { onArViewChange(null) }
+    }
+}
 
-                val anchorNode = AnchorNode(engine = engine, anchor = anchor)
-                MemorialItems.renderOfferings(engine, materialLoader, anchorNode, layout)
-                childNodes += anchorNode
-                hasPlaced = true
-                setStatus("${memorial.title} · ${memorial.offerings.summary()}")
-            }
-        )
+/**
+ * The surface under a tap: a detected plane if possible, otherwise a depth or feature point on
+ * level ground (so a tap just beside the detected area still works). Walls and slopes are skipped.
+ */
+private fun Frame.surfaceHitAt(motionEvent: MotionEvent): HitResult? {
+    val hits = hitTest(motionEvent).filter { it.trackable.trackingState == TrackingState.TRACKING }
+    return hits.firstOrNull { hit ->
+        val plane = hit.trackable as? Plane
+        plane != null && plane.type == Plane.Type.HORIZONTAL_UPWARD_FACING && plane.isPoseInPolygon(hit.hitPose)
+    } ?: hits.firstOrNull { hit ->
+        val trackable = hit.trackable
+        val isSurfacePoint = trackable is DepthPoint ||
+            (trackable is Point && trackable.orientationMode == Point.OrientationMode.ESTIMATED_SURFACE_NORMAL)
+        // The hit pose's Y axis is the surface normal; keep it close to straight up
+        isSurfacePoint && hit.hitPose.yAxis[1] > LEVEL_SURFACE_MIN_UP
+    }
+}
+
+/** Points the memorial's front (+z) at the camera, standing upright at [hitPose]. */
+private fun facingCamera(hitPose: Pose, cameraPose: Pose): Pose {
+    val yaw = atan2(cameraPose.tx() - hitPose.tx(), cameraPose.tz() - hitPose.tz())
+    return Pose(
+        floatArrayOf(hitPose.tx(), hitPose.ty(), hitPose.tz()),
+        floatArrayOf(0f, sin(yaw / 2), 0f, cos(yaw / 2))
     )
 }
 
