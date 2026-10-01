@@ -2,7 +2,6 @@ package com.memoria.idedikate.ar
 
 import android.util.Log
 import androidx.compose.ui.graphics.Color
-import com.google.android.filament.Colors
 import com.google.android.filament.Engine
 import com.google.android.filament.LightManager
 import com.google.android.filament.MaterialInstance
@@ -13,6 +12,7 @@ import dev.romainguy.kotlin.math.Float3
 import dev.romainguy.kotlin.math.Mat4
 import io.github.sceneview.geometries.Geometry
 import io.github.sceneview.loaders.MaterialLoader
+import io.github.sceneview.material.setColor
 import io.github.sceneview.math.Position
 import io.github.sceneview.math.Rotation
 import io.github.sceneview.math.Scale
@@ -67,10 +67,14 @@ data class Offset(
 object MemorialItems {
 
     private const val PLAQUE_SPACING = 0.26f
+    private const val PLAQUE_WIDTH = 0.22f
     private const val CANDLE_SPACING = 0.07f
     private const val POT_Z = 0.25f
     private const val POT_HEIGHT = 0.07f
     private const val POT_INNER_RADIUS = 0.035f
+    private const val POT_RADIUS = 0.05f
+    /** Room left between a candle standing in the pot and the incense sticks around it. */
+    private const val POT_CANDLE_CLEARANCE = 0.004f
     private const val STICK_BASE_Y = 0.05f
     const val STICK_LENGTH = 0.25f
     /** Sticks at the rim of the pot lean out this far, like a real handful of joss sticks. */
@@ -80,9 +84,10 @@ object MemorialItems {
 
     /** Flowers per bunch: one in the middle and the rest fanned out around it. */
     const val BOUQUET_SIZE = 7
-    private const val BOUQUET_X = -0.34f
-    private const val BOUQUET_Z = 0.12f
-    private const val BOUQUET_SPACING = 0.32f
+    /** Halfway between the front of the plaques and the back of the incense pot. */
+    private const val BOUQUET_Z = 0.1f
+    /** About the width of a bunch's fanned-out blooms, so neighbouring bunches just touch. */
+    private const val BOUQUET_SPACING = 0.24f
     /** How far apart the stems start at the base of a bunch. */
     private const val BOUQUET_STEM_SPREAD = 0.006f
     private const val BOUQUET_FAN_DEG = 20f
@@ -90,13 +95,18 @@ object MemorialItems {
     private const val SINGLE_FLOWER_TILT_DEG = 12f
 
     private const val CANDLE_HEIGHT = 0.12f
+    private const val CANDLE_RADIUS = 0.015f
+    /** Space between the candles at each side and the nearest other offering. */
+    private const val SIDE_CANDLE_GAP = 0.04f
+    private const val SIDE_CANDLE_Z = 0.15f
     private const val WICK_HEIGHT = 0.012f
     private const val CANDLE_LIGHT_Y = 0.22f
 
     /**
      * Arranges a memorial's offerings around its anchor: plaques in a row at the back, incense
-     * sticks in a pot at the front, bunches of lilies to the left and candles to the right (each
-     * in a compact grid, so large quantities stay close together).
+     * sticks in a pot at the front, and bunches of lilies in a row between them, centered. Candles
+     * flank everything else, split evenly left and right;
+     * with an odd number, the odd one stands in the incense pot (or front and center without one).
      */
     fun layoutFor(offerings: MemorialOfferings): List<Pair<MemorialItemType, Offset>> = buildList {
         val plaqueCount = offerings.plaques
@@ -104,20 +114,23 @@ object MemorialItems {
             add(MemorialItemType.PLAQUE to Offset((i - (plaqueCount - 1) / 2f) * PLAQUE_SPACING, 0f, 0f, 0f))
         }
 
-        addIncense(offerings.incenseSticks)
+        val centerCandle = offerings.candles % 2 == 1
+        addIncense(offerings.incenseSticks, candleInPot = centerCandle)
         addBouquets(offerings.flowers)
-        addCandles(offerings.candles)
+        addCandles(offerings.candles, inPot = centerCandle && offerings.incenseSticks > 0)
     }
 
-    private fun MutableList<Pair<MemorialItemType, Offset>>.addIncense(sticks: Int) {
+    private fun MutableList<Pair<MemorialItemType, Offset>>.addIncense(sticks: Int, candleInPot: Boolean) {
         if (sticks <= 0) return
         add(MemorialItemType.INCENSE_POT to Offset(0f, 0f, POT_Z, 0f))
         val streams = min(sticks, MAX_SMOKE_STREAMS)
         val smokingSticks = List(streams) { it * sticks / streams }.toSet()
+        // A candle in the pot takes the middle, so the sticks keep to the ring around it
+        val innerRadius = if (candleInPot) CANDLE_RADIUS + POT_CANDLE_CLEARANCE else 0f
         // Sunflower spiral spreads any number of sticks evenly across the pot opening
         repeat(sticks) { i ->
             val spread = sqrt((i + 0.5f) / sticks)
-            val radius = POT_INNER_RADIUS * spread
+            val radius = sqrt(innerRadius.pow(2) + (POT_INNER_RADIUS.pow(2) - innerRadius.pow(2)) * spread.pow(2))
             val angle = i * GOLDEN_ANGLE
             val x = radius * cos(angle)
             val z = POT_Z + radius * sin(angle)
@@ -140,15 +153,15 @@ object MemorialItems {
 
     /**
      * Groups flowers into bunches of up to [BOUQUET_SIZE]: stems gathered at the base and tied
-     * with a ribbon, blooms fanned out around a central one. Extra bunches fill a grid leftward.
+     * with a ribbon, blooms fanned out around a central one. The bunches stand in a centered row
+     * between the plaques and the incense pot, the only gap deep enough for one row.
      */
     private fun MutableList<Pair<MemorialItemType, Offset>>.addBouquets(flowers: Int) {
         if (flowers <= 0) return
         val bouquets = ceil(flowers / BOUQUET_SIZE.toFloat()).toInt()
-        val columns = ceil(sqrt(bouquets.toFloat())).toInt()
         repeat(bouquets) { b ->
-            val cx = BOUQUET_X - (b % columns) * BOUQUET_SPACING
-            val cz = BOUQUET_Z + (b / columns) * BOUQUET_SPACING
+            val cx = (b - (bouquets - 1) / 2f) * BOUQUET_SPACING
+            val cz = BOUQUET_Z
             val count = min(BOUQUET_SIZE, flowers - b * BOUQUET_SIZE)
             if (count == 1) {
                 add(MemorialItemType.FLOWER to Offset(cx, 0f, cz, 0f, SINGLE_FLOWER_TILT_DEG))
@@ -176,22 +189,53 @@ object MemorialItems {
         }
     }
 
-    private fun MutableList<Pair<MemorialItemType, Offset>>.addCandles(count: Int) {
+    /**
+     * Candles go last so they can flank everything already placed. An odd one out stands in the
+     * incense pot when [inPot], otherwise front and center; the rest split evenly left and right.
+     */
+    private fun MutableList<Pair<MemorialItemType, Offset>>.addCandles(count: Int, inPot: Boolean) {
         if (count <= 0) return
-        val columns = ceil(sqrt(count.toFloat())).toInt()
-        val rows = ceil(count / columns.toFloat()).toInt()
-        repeat(count) { i ->
-            add(MemorialItemType.CANDLE to Offset(0.25f + (i % columns) * CANDLE_SPACING, 0f, 0.15f + (i / columns) * CANDLE_SPACING, 0f))
+        val candles = mutableListOf<Offset>()
+        if (count % 2 == 1) {
+            // Standing on the ash in the pot, or on the ground where the pot would be
+            candles += Offset(0f, if (inPot) POT_HEIGHT + 0.002f else 0f, POT_Z, 0f)
+            add(MemorialItemType.CANDLE to candles.single())
         }
-        // One light over the whole group; a light per candle would be costly and look the same
+        val perSide = count / 2
+        if (perSide > 0) {
+            // Measured after the center candle, so the sides clear it too
+            val left = minOf(0f, minOfOrNull { it.second.x - halfWidth(it.first) } ?: 0f)
+            val right = maxOf(0f, maxOfOrNull { it.second.x + halfWidth(it.first) } ?: 0f)
+            val columns = ceil(sqrt(perSide.toFloat())).toInt()
+            repeat(perSide) { i ->
+                // Each side's grid starts next to the other offerings and grows outward
+                val dx = SIDE_CANDLE_GAP + CANDLE_RADIUS + (i % columns) * CANDLE_SPACING
+                val z = SIDE_CANDLE_Z + (i / columns) * CANDLE_SPACING
+                candles += Offset(left - dx, 0f, z, 0f)
+                candles += Offset(right + dx, 0f, z, 0f)
+            }
+            candles.drop(count % 2).forEach { add(MemorialItemType.CANDLE to it) }
+        }
+        // One light over all the candles; a light per candle would be costly and look the same
         add(
             MemorialItemType.CANDLE_LIGHT to Offset(
-                0.25f + (columns - 1) * CANDLE_SPACING / 2f,
+                candles.map { it.x }.average().toFloat(),
                 CANDLE_LIGHT_Y,
-                0.15f + (rows - 1) * CANDLE_SPACING / 2f,
+                candles.map { it.z }.average().toFloat(),
                 0f
             )
         )
+    }
+
+    /** How far an item reaches sideways from its position, so candles beside it don't overlap it. */
+    private fun halfWidth(type: MemorialItemType): Float = when (type) {
+        MemorialItemType.PLAQUE -> PLAQUE_WIDTH / 2f
+        MemorialItemType.INCENSE_POT -> POT_RADIUS + 0.004f
+        // Blooms fan out from the stems
+        MemorialItemType.FLOWER -> 0.12f
+        MemorialItemType.BOUQUET_TIE -> 0.03f
+        MemorialItemType.CANDLE -> CANDLE_RADIUS
+        else -> 0f
     }
 
     private const val GOLDEN_ANGLE = 2.3999631f // radians
@@ -352,10 +396,8 @@ object MemorialItems {
                     puff.scale = Scale(size, size * 1.8f, size)
                     // Fade in just above the tip, then thin out as it spreads
                     val alpha = SMOKE_ALPHA * min(1f, p / 0.12f) * (1f - p).pow(1.3f)
-                    material.setParameter(
-                        "baseColor", Colors.RgbaType.SRGB,
-                        SMOKE_COLOR.red, SMOKE_COLOR.green, SMOKE_COLOR.blue, alpha
-                    )
+                    // SceneView's color material names this parameter "color"; Filament aborts on unknown names
+                    material.setColor(SMOKE_COLOR.copy(alpha = alpha))
                 }
             }
         }
@@ -363,7 +405,7 @@ object MemorialItems {
 
     /** Brass pot filled with ash, which the sticks stand in. */
     private fun incensePot(engine: Engine, materials: Materials): Node {
-        val radius = 0.05f
+        val radius = POT_RADIUS
         return Node(engine).apply {
             addChildNode(
                 CylinderNode(
@@ -420,7 +462,7 @@ object MemorialItems {
     // ---- Plaque ----
 
     private fun plaque(engine: Engine, materials: Materials, photoTexture: Texture?): Node {
-        val width = 0.22f
+        val width = PLAQUE_WIDTH
         val height = 0.28f
         val depth = 0.015f
 
@@ -461,7 +503,7 @@ object MemorialItems {
 
     /** An ivory pillar candle with a flickering flame and a soft glow around it. */
     private fun candle(engine: Engine, materials: Materials, seed: Int): Node {
-        val radius = 0.015f
+        val radius = CANDLE_RADIUS
         val flame = Node(engine).apply {
             position = Position(0f, CANDLE_HEIGHT + WICK_HEIGHT * 0.4f, 0f)
             // Outer flame: translucent orange

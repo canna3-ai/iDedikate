@@ -53,15 +53,76 @@ class MemorialLayoutTest {
     }
 
     @Test
-    fun `flowers on the left, candles on the right, none overlapping`() {
-        val layout = MemorialItems.layoutFor(MemorialOfferings(flowers = 10, candles = 10))
-        val flowers = layout.offsets(MemorialItemType.FLOWER)
-        val candles = layout.offsets(MemorialItemType.CANDLE)
+    fun `an even number of candles splits left and right of everything else`() {
+        listOf(2, 4, 10).forEach { count ->
+            val layout = MemorialItems.layoutFor(MemorialOfferings(plaques = 3, incenseSticks = 5, flowers = 10, candles = count))
+            val candles = layout.offsets(MemorialItemType.CANDLE)
+            val others = layout.filter { it.first != MemorialItemType.CANDLE && it.first != MemorialItemType.CANDLE_LIGHT }
+                .map { it.second.x }
 
-        assertTrue(flowers.all { it.x < 0f })
-        assertTrue(candles.all { it.x > 0f })
-        val all = flowers + candles
-        assertEquals(all.size, all.map { it.x to it.z }.distinct().size)
+            assertEquals(count, candles.size)
+            assertEquals(count / 2, candles.count { it.x < others.min() })
+            assertEquals(count / 2, candles.count { it.x > others.max() })
+            assertEquals(candles.size, candles.map { it.x to it.z }.distinct().size)
+        }
+    }
+
+    @Test
+    fun `two candles mirror each other`() {
+        val (left, right) = MemorialItems.layoutFor(MemorialOfferings(plaques = 1, candles = 2))
+            .offsets(MemorialItemType.CANDLE).sortedBy { it.x }
+
+        assertEquals(-left.x, right.x, 1e-4f)
+        assertEquals(left.z, right.z, 1e-4f)
+        // Clear of the plaque's edges
+        assertTrue(right.x > 0.11f)
+    }
+
+    @Test
+    fun `an odd candle stands in the incense pot, clear of the sticks`() {
+        listOf(1, 3, 5).forEach { count ->
+            val layout = MemorialItems.layoutFor(MemorialOfferings(incenseSticks = 20, candles = count))
+            val pot = layout.offsets(MemorialItemType.INCENSE_POT).single()
+            val inPot = layout.offsets(MemorialItemType.CANDLE).filter { hypot(it.x - pot.x, it.z - pot.z) < 1e-4f }
+
+            assertEquals(1, inPot.size)
+            assertTrue(inPot.single().y > 0f) // on the ash, not the ground
+            layout.offsets(MemorialItemType.INCENSE_STICK).forEach { stick ->
+                val r = hypot(stick.x - pot.x, stick.z - pot.z)
+                assertTrue(r >= 0.015f && r <= 0.035f + 1e-4f)
+            }
+            assertEquals((count - 1) / 2, layout.offsets(MemorialItemType.CANDLE).count { it.x < -0.05f })
+            assertEquals((count - 1) / 2, layout.offsets(MemorialItemType.CANDLE).count { it.x > 0.05f })
+        }
+    }
+
+    @Test
+    fun `without incense an odd candle stands front and center`() {
+        val candles = MemorialItems.layoutFor(MemorialOfferings(plaques = 1, flowers = 3, candles = 3))
+            .offsets(MemorialItemType.CANDLE)
+        val center = candles.single { it.x == 0f }
+
+        assertEquals(0f, center.y)
+        assertTrue(center.z > 0f)
+        assertEquals(1, candles.count { it.x < 0f })
+        assertEquals(1, candles.count { it.x > 0f })
+    }
+
+    @Test
+    fun `flowers stand centered between the plaque and the pot`() {
+        listOf(1, 7, 10, 99).forEach { count ->
+            val layout = MemorialItems.layoutFor(MemorialOfferings(plaques = 1, incenseSticks = 5, flowers = count))
+            val plaque = layout.offsets(MemorialItemType.PLAQUE).single()
+            val pot = layout.offsets(MemorialItemType.INCENSE_POT).single()
+            val bunches = layout.filter { it.first == MemorialItemType.FLOWER || it.first == MemorialItemType.BOUQUET_TIE }
+
+            bunches.forEach { (_, offset) ->
+                // In front of the plaque's face, behind the pot's back edge
+                assertTrue(offset.z > plaque.z + 0.05f && offset.z < pot.z - 0.1f)
+            }
+            val xs = bunches.map { it.second.x }
+            assertEquals(0f, (xs.min() + xs.max()) / 2f, 0.01f)
+        }
     }
 
     @Test

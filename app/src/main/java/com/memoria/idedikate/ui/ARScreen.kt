@@ -1,7 +1,10 @@
 package com.memoria.idedikate.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.util.Log
 import android.view.MotionEvent
@@ -65,6 +68,7 @@ import com.memoria.idedikate.model.ArMemorial
 import io.github.sceneview.ar.ARScene
 import io.github.sceneview.ar.node.AnchorNode
 import io.github.sceneview.ar.node.TerrainAnchorNode
+import io.github.sceneview.node.Node
 import io.github.sceneview.rememberEngine
 import io.github.sceneview.rememberMaterialLoader
 import io.github.sceneview.rememberNodes
@@ -243,8 +247,10 @@ private class SessionState {
     var geospatialSupported = true
     /** The mode the session is currently configured for; null until the first frame. */
     var configuredMode: ArMode? = null
-    /** Nodes from a previous mode, already out of the scene; destroyed with the screen. */
+    /** Nodes from a previous mode, already out of the scene; released with the screen. */
     val retiredNodes = mutableListOf<AnchorNode>()
+    /** Set once the screen is leaving, when the session may already be closing and anchors must not be touched. */
+    var screenDisposed = false
 }
 
 @Composable
@@ -272,6 +278,8 @@ private fun ARSceneViewCompose(
         onDispose {
             // Leaving this mode: stop anchor resolution and take its memorial out of the scene
             geo.cancelled = true
+            // When the whole screen is going away, the effect below has already cleaned up
+            if (sessionState.screenDisposed) return@onDispose
             childNodes.filterIsInstance<AnchorNode>().forEach { node ->
                 runCatching { node.detachAnchor() }
                 sessionState.retiredNodes += node
@@ -280,11 +288,28 @@ private fun ARSceneViewCompose(
         }
     }
     DisposableEffect(Unit) {
-        // Registered after the engine, so this runs before the engine is destroyed
+        // Registered after the mode effect and the loaders, so this runs before them when the screen goes away
         onDispose {
-            sessionState.retiredNodes.forEach { runCatching { it.destroy() } }
+            sessionState.screenDisposed = true
+            // Destroy everything except the anchor nodes themselves: AnchorNode.destroy() detaches its
+            // anchor, and ARCore segfaults (uncatchably) if that races SceneView closing the session on
+            // a background thread. The anchors go with the session, and the bare nodes with the engine.
+            // The meshes and lights must go now, before the material loader destroys their materials.
+            (childNodes + sessionState.retiredNodes).forEach { it.destroyDescendants() }
+            // Also keeps rememberNodes from destroying the anchor nodes
+            childNodes.clear()
             sessionState.retiredNodes.clear()
         }
+    }
+
+    // Once placed, rotating would recreate the activity and lose the memorial, so hold the current
+    // orientation until the user leaves the AR view (or switches mode) and starts over
+    val activity = LocalContext.current.findActivity()
+    DisposableEffect(activity, mode == ArMode.PLACE_ANYWHERE && hasPlaced) {
+        if (activity == null || mode != ArMode.PLACE_ANYWHERE || !hasPlaced) return@DisposableEffect onDispose {}
+        val previous = activity.requestedOrientation
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        onDispose { activity.requestedOrientation = previous }
     }
 
     fun setStatus(text: String) {
@@ -436,6 +461,21 @@ private fun Frame.surfaceHitAt(motionEvent: MotionEvent): HitResult? {
             (trackable is Point && trackable.orientationMode == Point.OrientationMode.ESTIMATED_SURFACE_NORMAL)
         // The hit pose's Y axis is the surface normal; keep it close to straight up
         isSurfacePoint && hit.hitPose.yAxis[1] > LEVEL_SURFACE_MIN_UP
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+/** Destroys every node below this one, deepest first; [Node.destroy] doesn't destroy children. */
+private fun Node.destroyDescendants() {
+    // Copy: destroying a child detaches it from this node
+    childNodes.toList().forEach { child ->
+        child.destroyDescendants()
+        runCatching { child.destroy() }
     }
 }
 
