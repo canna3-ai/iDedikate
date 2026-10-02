@@ -299,12 +299,12 @@ object MemorialItems {
         fun texture(texture: Texture): MaterialInstance = loader.createTextureInstance(texture)
     }
 
-    private fun MaterialInstance.setEmissive(color: Color) {
+    internal fun MaterialInstance.setEmissive(color: Color) {
         // w = 0: not dimmed by the camera exposure, so it glows even in bright daylight AR
         if (material.hasParameter("emissive")) setParameter("emissive", color.red, color.green, color.blue, 0f)
     }
 
-    private fun geometryNode(engine: Engine, mesh: MeshBuilder, vertices: List<Geometry.Vertex>, materials: List<MaterialInstance>): Node {
+    internal fun geometryNode(engine: Engine, mesh: MeshBuilder, vertices: List<Geometry.Vertex>, materials: List<MaterialInstance>): GeometryNode {
         val geometry = Geometry.Builder(RenderableManager.PrimitiveType.TRIANGLES)
             .vertices(vertices)
             .primitivesIndices(mesh.parts)
@@ -312,7 +312,7 @@ object MemorialItems {
         return GeometryNode(engine, geometry, materials, geometry.primitivesOffsets)
     }
 
-    private fun MeshBuilder.toVertices() = positions.indices.map { Geometry.Vertex(position = positions[it], normal = normals[it]) }
+    internal fun MeshBuilder.toVertices() = positions.indices.map { Geometry.Vertex(position = positions[it], normal = normals[it]) }
 
     // ---- Incense ----
 

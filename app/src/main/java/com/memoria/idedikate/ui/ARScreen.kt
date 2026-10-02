@@ -63,6 +63,7 @@ import com.google.ar.core.exceptions.UnavailableSdkTooOldException
 import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException
 import com.memoria.idedikate.ar.ArPhoto
 import com.memoria.idedikate.ar.GeoMath
+import com.memoria.idedikate.ar.LocatorBeacon
 import com.memoria.idedikate.ar.MemorialItems
 import com.memoria.idedikate.model.ArMemorial
 import io.github.sceneview.ar.ARScene
@@ -236,6 +237,8 @@ fun ARScreen(memorial: ArMemorial?) {
 private class GeoPlacement {
     var resolving = false
     var node: AnchorNode? = null
+    /** Blinking arrow over the placed memorial, to find it from afar. */
+    var beacon: LocatorBeacon? = null
     var failed = false
     var lastStatus = ""
     /** Set once the user switches away, so a terrain anchor still resolving is dropped. */
@@ -410,6 +413,10 @@ private fun ARSceneViewCompose(
                                     node?.let { runCatching { it.detachAnchor() }; it.destroy() }
                                 } else if (node != null) {
                                     MemorialItems.renderOfferings(engine, materialLoader, node, layout)
+                                    geo.beacon = runCatching { LocatorBeacon(engine, materialLoader) }
+                                        .onFailure { Log.e("ARScreen", "Couldn't create locator beacon", it) }
+                                        .getOrNull()
+                                        ?.also { node.addChildNode(it) }
                                     childNodes += node
                                     geo.node = node
                                 } else {
@@ -532,6 +539,7 @@ private fun updateGeospatial(
 
     val placed = geo.node
     if (placed != null) {
+        geo.beacon?.update(distance)
         return setStatus("${memorial.title} · ${GeoMath.formatDistance(distance)} away · ${memorial.offerings.summary()}")
     }
     if (pose.horizontalAccuracy > MAX_HORIZONTAL_ACCURACY_M || pose.orientationYawAccuracy > MAX_YAW_ACCURACY_DEG) {

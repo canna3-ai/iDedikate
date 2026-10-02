@@ -75,7 +75,7 @@ object ArPhoto {
             textAlign = Paint.Align.CENTER
         }
         val maxWidth = photo.width - unit * 8
-        val line = TextUtils.ellipsize("In loving memory of $title", TextPaint(titlePaint), maxWidth, TextUtils.TruncateAt.END)
+        val line = TextUtils.ellipsize(title, TextPaint(titlePaint), maxWidth, TextUtils.TruncateAt.END)
         val centerX = photo.width / 2f
         canvas.drawText(line.toString(), centerX, photo.height - stripHeight + unit * 7.5f, titlePaint)
         canvas.drawText("iDedikate", centerX, photo.height - stripHeight + unit * 12.5f, creditPaint)
@@ -95,7 +95,7 @@ object ArPhoto {
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "image/jpeg"
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_TEXT, "In loving memory of $title, shared from iDedikate")
+            putExtra(Intent.EXTRA_TEXT, "$title, shared from iDedikate")
             // ClipData lets the chooser's preview and the target app read the image
             clipData = ClipData.newRawUri(null, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
