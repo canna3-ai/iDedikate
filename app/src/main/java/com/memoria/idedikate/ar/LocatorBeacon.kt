@@ -46,10 +46,10 @@ class LocatorBeacon(engine: Engine, materialLoader: MaterialLoader) : Node(engin
 
     companion object {
         /** Below this distance the memorial itself is easy enough to see. */
-        const val SHOW_BEYOND_M = 20.0
-        private const val HYSTERESIS_M = 1.5
-        /** Arrow height per meter of distance: about 3° tall on screen. */
-        private const val SIZE_PER_METER = 0.05
+        const val SHOW_BEYOND_M = 5.0
+        private const val HYSTERESIS_M = 1.0
+        /** Arrow height per meter of distance: about 9° tall on screen. */
+        private const val SIZE_PER_METER = 0.15
         private const val LIFT_M = 1f
         private const val BLINK_SECONDS = 1.0
         private const val BLINK_ON_FRACTION = 0.6
@@ -59,8 +59,8 @@ class LocatorBeacon(engine: Engine, materialLoader: MaterialLoader) : Node(engin
         private val arrowMesh: MeshBuilder by lazy {
             MeshBuilder(1).apply {
                 val headHeight = 0.45f
-                val headRadius = 0.25f
-                val shaftRadius = 0.09f
+                val headRadius = 0.5f
+                val shaftRadius = 0.22f
                 // Profile from the tip up, closed at the top
                 val profile = listOf(
                     0f to 0f,
