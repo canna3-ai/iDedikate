@@ -17,8 +17,7 @@ playServicesLocation = "21.4.0"
 material = "1.14.0"
 googleServices = "4.5.0"
 firebaseBom = "34.19.0"
-mapsCompose = "4.3.3"
-playServicesMaps = "20.0.0"
+osmdroid = "6.1.20"
 playServicesAds = "25.5.0"
 arCore = "1.56.0"
 secretsGradlePlugin = "2.0.1"
@@ -58,8 +57,7 @@ material = { group = "com.google.android.material", name = "material", version.r
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
 firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }
 firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore" }
-maps-compose = { group = "com.google.maps.android", name = "maps-compose", version.ref = "mapsCompose" }
-play-services-maps = { group = "com.google.android.gms", name = "play-services-maps", version.ref = "playServicesMaps" }
+osmdroid-android = { group = "org.osmdroid", name = "osmdroid-android", version.ref = "osmdroid" }
 play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 arcore = { group = "com.google.ar", name = "core", version.ref = "arCore" }
 arsceneview = { group = "io.github.sceneview", name = "arsceneview", version.ref = "sceneview" }

@@ -2,8 +2,6 @@ package com.memoria.idedikate.ui
 
 import android.util.Log
 import androidx.lifecycle.ViewModel
-import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.LatLngBounds
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
@@ -18,6 +16,7 @@ import com.memoria.idedikate.model.PinVisibility
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.osmdroid.util.GeoPoint
 
 /**
  * Memorial pins backed by the Firestore "memorials" collection.
@@ -67,10 +66,10 @@ class MapViewModel : ViewModel() {
     var locationPermissionRequested = false
 
     /**
-     * Live-loads visible pins inside [bounds], filtering both latitude and longitude in the query so
-     * the per-query limit only counts pins that are actually on screen.
+     * Live-loads visible pins inside the given bounds, filtering both latitude and longitude in the
+     * query so the per-query limit only counts pins that are actually on screen.
      */
-    fun setVisibleBounds(bounds: LatLngBounds) {
+    fun setVisibleBounds(south: Double, west: Double, north: Double, east: Double) {
         val uid = currentUid ?: return
         if (uid != loadedForUid) stopListening()
         registrations.forEach { it.remove() }
@@ -78,8 +77,6 @@ class MapViewModel : ViewModel() {
         loadedForUid = uid
 
         // Bounds crossing the antimeridian have west > east: query each side of it separately
-        val west = bounds.southwest.longitude
-        val east = bounds.northeast.longitude
         val longitudeRanges = if (west <= east) listOf(west to east) else listOf(west to 180.0, -180.0 to east)
         val audiences = buildList {
             add(SOURCE_PUBLIC to collection.whereEqualTo(FIELD_VISIBILITY, PinVisibility.PUBLIC.firestoreValue))
@@ -91,7 +88,7 @@ class MapViewModel : ViewModel() {
             longitudeRanges.forEachIndexed { i, (fromLng, toLng) ->
                 val source = "$audience-$i"
                 sources += source
-                listen(source, query, bounds.southwest.latitude, bounds.northeast.latitude, fromLng, toLng)
+                listen(source, query, south, north, fromLng, toLng)
             }
         }
         // Keep showing the previous pins until the new queries answer, except from queries that are gone
@@ -106,7 +103,7 @@ class MapViewModel : ViewModel() {
      * server has accepted it (so not while offline).
      */
     fun placeMemorial(
-        latLng: LatLng,
+        location: GeoPoint,
         message: String,
         visibility: PinVisibility,
         sharedWith: List<String>,
@@ -121,8 +118,8 @@ class MapViewModel : ViewModel() {
         }
         val memorialRef = collection.document()
         val memorial = mapOf(
-            FIELD_LATITUDE to latLng.latitude,
-            FIELD_LONGITUDE to latLng.longitude,
+            FIELD_LATITUDE to location.latitude,
+            FIELD_LONGITUDE to location.longitude,
             FIELD_MESSAGE to message,
             FIELD_OWNER_UID to uid,
             FIELD_VISIBILITY to visibility.firestoreValue,

@@ -76,7 +76,6 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import com.google.android.gms.ads.MobileAds
 import com.google.android.gms.ads.RequestConfiguration
-import com.google.android.gms.maps.model.LatLng
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.memoria.idedikate.ads.BannerAdView
@@ -97,11 +96,12 @@ import com.memoria.idedikate.ui.theme.IDedikateTheme
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import org.osmdroid.util.GeoPoint
 
 /** [focusLatitude]/[focusLongitude]: a memorial to center on (from the Memorials tab); null centers on the user. */
 @Serializable
 data class MapRoute(val focusLatitude: Double? = null, val focusLongitude: Double? = null) : NavKey {
-    val focus: LatLng? get() = if (focusLatitude != null && focusLongitude != null) LatLng(focusLatitude, focusLongitude) else null
+    val focus: GeoPoint? get() = if (focusLatitude != null && focusLongitude != null) GeoPoint(focusLatitude, focusLongitude) else null
 }
 
 /** [memorial] is the memorial chosen on the map; null when opened from the tab bar. */

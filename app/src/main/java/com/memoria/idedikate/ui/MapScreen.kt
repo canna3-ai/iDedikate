@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
@@ -26,7 +27,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddLocationAlt
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -36,13 +39,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.UiComposable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.draw.shadow
@@ -56,26 +61,39 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.LatLngBounds
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.MapProperties
-import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.MarkerComposable
-import com.google.maps.android.compose.rememberCameraPositionState
-import com.google.maps.android.compose.rememberMarkerState
 import com.memoria.idedikate.TokenViewModel
 import com.memoria.idedikate.model.MemorialItem
 import com.memoria.idedikate.model.MemorialOfferings
 import com.memoria.idedikate.model.OfferingType
 import com.memoria.idedikate.model.Wallet
 import com.memoria.idedikate.model.PinVisibility
+import java.io.File
 import kotlin.math.roundToInt
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.BoundingBox
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.TileSystem
+import org.osmdroid.views.CustomZoomButtonsController
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.MapEventsOverlay
 
 /**
  * Map marker for a memorial: a pill showing an icon for each offering placed there (with a count
@@ -205,8 +223,8 @@ private fun MarkerPill(
 /**
  * Marker size for a map zoom level: 1.0 at neighborhood level (zoom 15), growing to 1.6 at street
  * level (zoom 17 and closer) and shrinking to 0.3 at whole-island level (zoom 12 and further out).
- * Rounded to steps of 0.1 because every size change re-renders each marker's bitmap; continuous
- * scaling would redraw them on every frame of a pinch.
+ * Rounded to steps of 0.1 because every size change recomposes each marker; continuous scaling
+ * would recompose them on every frame of a pinch.
  */
 private fun markerScaleFor(zoom: Float): Float {
     val scale = if (zoom >= NEIGHBORHOOD_ZOOM) {
@@ -241,13 +259,99 @@ private fun Context.hasLocationPermission(): Boolean =
     ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
         ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
+/** Map zoom limits; OpenStreetMap tiles go to 19, closer zoom levels enlarge them. */
+private const val MIN_ZOOM = 2.0
+private const val MAX_ZOOM = 21.0
+
+/** How long the map must stay still before the pins for the visible area are reloaded. */
+private const val CAMERA_SETTLE_MS = 300L
+
+private val MY_LOCATION_BLUE = Color(0xFF1A73E8)
+
+/** The OpenStreetMap map view, configured once per screen. */
+private fun createMapView(context: Context, center: GeoPoint, zoom: Double): MapView {
+    // Must be configured before the first MapView exists. The tile servers require an identifying user agent
+    Configuration.getInstance().apply {
+        userAgentValue = context.packageName
+        osmdroidBasePath = File(context.cacheDir, "osmdroid")
+        osmdroidTileCache = File(osmdroidBasePath, "tiles")
+    }
+    return MapView(context).apply {
+        setTileSource(TileSourceFactory.MAPNIK)
+        setMultiTouchControls(true)
+        zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
+        // Tiles sized in dp rather than pixels, so zoom levels match what the marker sizing expects
+        isTilesScaledToDpi = true
+        minZoomLevel = MIN_ZOOM
+        maxZoomLevel = MAX_ZOOM
+        isVerticalMapRepetitionEnabled = false
+        val tileSystem = MapView.getTileSystem()
+        setScrollableAreaLimitLatitude(tileSystem.maxLatitude, tileSystem.minLatitude, 0)
+        controller.setZoom(zoom)
+        controller.setCenter(center)
+    }
+}
+
+/** Loads the pins for the visible area, once the map has been laid out. */
+private fun MapView.loadVisiblePins(mapViewModel: MapViewModel) {
+    if (width == 0 || height == 0) return
+    val box = boundingBox
+    // Zoomed out far enough that the world repeats across the screen: every longitude is visible
+    val wholeWorld = width >= TileSystem.MapSize(zoomLevelDouble)
+    mapViewModel.setVisibleBounds(
+        south = box.latSouth,
+        west = if (wholeWorld) -180.0 else box.lonWest,
+        north = box.latNorth,
+        east = if (wholeWorld) 180.0 else box.lonEast
+    )
+}
+
+/**
+ * Places the content on [point] of [mapView], its bottom center there (or its center, with
+ * [centered]). Reading [cameraTick] here re-places the content as the map moves without
+ * recomposing it.
+ */
+private fun Modifier.atMapPoint(
+    mapView: MapView,
+    point: GeoPoint,
+    cameraTick: () -> Int,
+    centered: Boolean = false
+): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+    layout(placeable.width, placeable.height) {
+        cameraTick()
+        val pixel = mapView.projection.toPixels(point, null)
+        val y = if (centered) pixel.y - placeable.height / 2 else pixel.y - placeable.height
+        placeable.place(pixel.x - placeable.width / 2, y)
+    }
+}
+
+/** The bubble shown above a tapped marker, like a map info window; tapping it opens the memorial. */
+@Composable
+private fun MarkerInfoBubble(title: String, snippet: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(8.dp)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .padding(bottom = 4.dp)
+            .shadow(4.dp, shape)
+            .background(Color.White, shape)
+            .clickable(onClick = onClick)
+            .widthIn(max = 260.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Text(title, color = Color.Black, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Text(snippet, color = Color.DarkGray, fontSize = 13.sp, textAlign = TextAlign.Center)
+    }
+}
+
 @SuppressLint("MissingPermission")
 @Composable
 fun MapScreen(
     tokenViewModel: TokenViewModel,
     onViewInAr: (MemorialItem) -> Unit,
     /** Center on this spot (e.g. a memorial picked in the Memorials tab) rather than the user's location. */
-    focus: LatLng? = null,
+    focus: GeoPoint? = null,
     mapViewModel: MapViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -284,20 +388,40 @@ fun MapScreen(
         }
     }
 
-    val cameraPositionState = rememberCameraPositionState {
-        position = focus?.let { CameraPosition.fromLatLngZoom(it, 17f) }
-            ?: CameraPosition.fromLatLngZoom(LatLng(0.0, 0.0), 2f)
-    }
+    val initialZoom = if (focus != null) 17.0 else MIN_ZOOM
+    val mapView = remember { createMapView(context, focus ?: GeoPoint(0.0, 0.0), initialZoom) }
+    // The map's camera mirrored into Compose: its zoom, and a tick that changes whenever it moves
+    var zoom by remember { mutableDoubleStateOf(initialZoom) }
+    var cameraTick by remember { mutableIntStateOf(0) }
+
     // Only changes when the zoom crosses a size step, so panning/zooming doesn't recompose markers
-    val markerScale by remember { derivedStateOf { markerScaleFor(cameraPositionState.position.zoom) } }
+    val markerScale by remember { derivedStateOf { markerScaleFor(zoom.toFloat()) } }
     // Memorials whose markers would cover each other share one stacked marker. Regrouped in half
     // zoom steps, which is as often as the grouping can noticeably change
-    val groupingZoom by remember { derivedStateOf { (cameraPositionState.position.zoom * 2).roundToInt() / 2f } }
+    val groupingZoom by remember { derivedStateOf { (zoom * 2).roundToInt() / 2f } }
     val markerGroups = remember(memorials, groupingZoom, markerScale) {
         groupOverlapping(memorials, groupingZoom, markerScale)
     }
-    val coroutineScope = rememberCoroutineScope()
     val zoomToGroupPaddingPx = with(LocalDensity.current) { ZOOM_TO_GROUP_PADDING.roundToPx() }
+
+    // The user's location, kept current while the map is shown, for the blue dot and the location button
+    var userLocation by remember { mutableStateOf<GeoPoint?>(null) }
+    DisposableEffect(hasLocationPermission) {
+        if (!hasLocationPermission) return@DisposableEffect onDispose { }
+        val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+        val callback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                result.lastLocation?.let { userLocation = GeoPoint(it.latitude, it.longitude) }
+            }
+        }
+        val request = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 5_000).build()
+        try {
+            fusedLocationClient.requestLocationUpdates(request, callback, context.mainLooper)
+        } catch (e: SecurityException) {
+            // Ignore, handled by hasLocationPermission check
+        }
+        onDispose { fusedLocationClient.removeLocationUpdates(callback) }
+    }
 
     LaunchedEffect(hasLocationPermission) {
         // When opened to show a specific memorial, stay on it instead of jumping to the user
@@ -305,7 +429,8 @@ fun MapScreen(
             val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
             val moveTo: (Location?) -> Unit = { location ->
                 location?.let {
-                    cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(it.latitude, it.longitude), 15f)
+                    mapView.controller.setZoom(15.0)
+                    mapView.controller.setCenter(GeoPoint(it.latitude, it.longitude))
                 }
             }
             try {
@@ -324,20 +449,18 @@ fun MapScreen(
         }
     }
 
-    // Reload pins for the visible area whenever the camera settles
-    LaunchedEffect(cameraPositionState.isMoving) {
-        if (!cameraPositionState.isMoving) {
-            cameraPositionState.projection?.visibleRegion?.latLngBounds?.let(mapViewModel::setVisibleBounds)
-        }
+    // Reload pins for the visible area whenever the camera settles (and once the map is first laid out)
+    LaunchedEffect(cameraTick) {
+        delay(CAMERA_SETTLE_MS)
+        mapView.loadVisiblePins(mapViewModel)
     }
 
-    val mapProperties = MapProperties(isMyLocationEnabled = hasLocationPermission)
-    val mapUiSettings = MapUiSettings(myLocationButtonEnabled = true)
-
     // Location chosen for a new memorial, the own memorial being managed, and the stacked marker being chosen from
-    var pendingPin by remember { mutableStateOf<LatLng?>(null) }
+    var pendingPin by remember { mutableStateOf<GeoPoint?>(null) }
     var editingPin by remember { mutableStateOf<MemorialItem?>(null) }
     var choosingGroup by remember { mutableStateOf<MemorialGroup?>(null) }
+    // The marker whose info bubble is showing, by its representative memorial's id
+    var selectedMarkerId by remember { mutableStateOf<String?>(null) }
     val offeringStock by tokenViewModel.offeringStock.collectAsState()
     val currentUid = mapViewModel.currentUid
 
@@ -358,28 +481,71 @@ fun MapScreen(
             onZoomIn = if (group.isSameSpot) null else {
                 {
                     choosingGroup = null
-                    val bounds = LatLngBounds.builder().apply {
-                        group.memorials.forEach { include(LatLng(it.latitude, it.longitude)) }
-                    }.build()
-                    coroutineScope.launch {
-                        cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, zoomToGroupPaddingPx))
-                    }
+                    val bounds = BoundingBox.fromGeoPointsSafe(group.memorials.map { GeoPoint(it.latitude, it.longitude) })
+                    mapView.zoomToBoundingBox(bounds, true, zoomToGroupPaddingPx)
                 }
             },
             onDismiss = { choosingGroup = null }
         )
     }
 
-    val startPlacing: (LatLng) -> Unit = { latLng ->
+    val startPlacing: (GeoPoint) -> Unit = { location ->
         // Final check happens atomically when the memorial is confirmed
         if (tokens >= MEMORIAL_TOKEN_COST) {
-            pendingPin = latLng
+            pendingPin = location
         } else {
             Toast.makeText(context, "You need $MEMORIAL_TOKEN_COST token to place a memorial. Earn more in the Wallet.", Toast.LENGTH_LONG).show()
         }
     }
+    val currentStartPlacing by rememberUpdatedState(startPlacing)
 
-    pendingPin?.let { latLng ->
+    // Mirror camera moves into Compose, place memorials on long press, close the info bubble on tap,
+    // and pause tile loading along with the screen
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(mapView, lifecycleOwner) {
+        val mapListener = object : MapListener {
+            override fun onScroll(event: ScrollEvent?): Boolean {
+                cameraTick++
+                return false
+            }
+
+            override fun onZoom(event: ZoomEvent?): Boolean {
+                zoom = mapView.zoomLevelDouble
+                cameraTick++
+                return false
+            }
+        }
+        val eventsOverlay = MapEventsOverlay(object : MapEventsReceiver {
+            override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
+                selectedMarkerId = null
+                return false
+            }
+
+            override fun longPressHelper(p: GeoPoint?): Boolean {
+                p?.let { currentStartPlacing(it) }
+                return true
+            }
+        })
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                else -> Unit
+            }
+        }
+        mapView.addMapListener(mapListener)
+        mapView.overlays.add(0, eventsOverlay)
+        mapView.addOnFirstLayoutListener { _, _, _, _, _ -> cameraTick++ }
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
+            mapView.removeMapListener(mapListener)
+            mapView.overlays.remove(eventsOverlay)
+            mapView.onDetach()
+        }
+    }
+
+    pendingPin?.let { location ->
         MemorialDialog(
             title = "Place a memorial",
             confirmLabel = "Place ($MEMORIAL_TOKEN_COST token)",
@@ -393,7 +559,7 @@ fun MapScreen(
                     OfferingType.entries.all { offerings[it] <= offeringStock[it] }
                 if (affordable) {
                     mapViewModel.placeMemorial(
-                        latLng, "In Loving Memory", visibility, sharedWith, offerings,
+                        location, "In Loving Memory", visibility, sharedWith, offerings,
                         onSuccess = { Toast.makeText(context, "Memorial placed!", Toast.LENGTH_SHORT).show() },
                         onFailure = { e ->
                             // Firestore has already rolled back the memorial and the payment locally
@@ -446,51 +612,63 @@ fun MapScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .clipToBounds()
         ) {
-            GoogleMap(
-                modifier = Modifier.fillMaxSize(),
-                cameraPositionState = cameraPositionState,
-                properties = mapProperties,
-                uiSettings = mapUiSettings,
-                onMapLoaded = {
-                    // Initial load, in case the camera never moves (e.g. no location permission)
-                    cameraPositionState.projection?.visibleRegion?.latLngBounds?.let(mapViewModel::setVisibleBounds)
-                },
-                onMapLongClick = startPlacing
-            ) {
-                markerGroups.forEach { group ->
-                    // The newest memorial stands for the group, at its exact spot
-                    val memorial = group.representative
-                    val behindVisibility = group.memorials.getOrNull(1)?.visibility
-                    key(memorial.id) {
-                        val isOwn = memorial.ownerUid == currentUid
-                        val markerState = rememberMarkerState(position = LatLng(memorial.latitude, memorial.longitude))
-                        // Re-rendered to a bitmap only when the visibility, offerings, size step or stack change
-                        MarkerComposable(
-                            memorial.visibility,
-                            memorial.offerings,
-                            markerScale,
-                            group.size,
-                            behindVisibility?.name.orEmpty(),
-                            state = markerState,
-                            title = if (group.size > 1) "${group.size} memorials here" else memorial.message,
-                            snippet = when {
-                                group.size == 1 -> memorial.markerSnippet(isOwn)
-                                group.isSameSpot -> "Tap to choose one"
-                                else -> "Tap to choose one or zoom in"
-                            },
-                            onInfoWindowClick = { if (group.size > 1) choosingGroup = group else openMemorial(memorial) },
-                            // Drawn with regular Compose UI into the marker bitmap, not onto the map
-                            content = @UiComposable {
-                                MemorialMarker(
-                                    memorial.visibility,
-                                    memorial.offerings,
-                                    markerScale,
-                                    stackCount = group.size,
-                                    behindVisibility = behindVisibility
-                                )
+            AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+
+            // Markers are regular Compose UI laid over the map, re-placed as it moves
+            userLocation?.let { location ->
+                Box(
+                    modifier = Modifier
+                        .atMapPoint(mapView, location, { cameraTick }, centered = true)
+                        .size(18.dp)
+                        .shadow(2.dp, CircleShape)
+                        .background(Color.White, CircleShape)
+                        .padding(3.dp)
+                        .background(MY_LOCATION_BLUE, CircleShape)
+                )
+            }
+            markerGroups.forEach { group ->
+                // The newest memorial stands for the group, at its exact spot
+                val memorial = group.representative
+                val behindVisibility = group.memorials.getOrNull(1)?.visibility
+                key(memorial.id) {
+                    val isOwn = memorial.ownerUid == currentUid
+                    val isSelected = memorial.id == selectedMarkerId
+                    val position = remember(memorial.latitude, memorial.longitude) { GeoPoint(memorial.latitude, memorial.longitude) }
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .zIndex(if (isSelected) 1f else 0f)
+                            .atMapPoint(mapView, position, { cameraTick })
+                    ) {
+                        if (isSelected) {
+                            MarkerInfoBubble(
+                                title = if (group.size > 1) "${group.size} memorials here" else memorial.message,
+                                snippet = when {
+                                    group.size == 1 -> memorial.markerSnippet(isOwn)
+                                    group.isSameSpot -> "Tap to choose one"
+                                    else -> "Tap to choose one or zoom in"
+                                },
+                                onClick = {
+                                    selectedMarkerId = null
+                                    if (group.size > 1) choosingGroup = group else openMemorial(memorial)
+                                }
+                            )
+                        }
+                        Box(
+                            modifier = Modifier.clickable(interactionSource = null, indication = null) {
+                                selectedMarkerId = if (isSelected) null else memorial.id
                             }
-                        )
+                        ) {
+                            MemorialMarker(
+                                memorial.visibility,
+                                memorial.offerings,
+                                markerScale,
+                                stackCount = group.size,
+                                behindVisibility = behindVisibility
+                            )
+                        }
                     }
                 }
             }
@@ -505,13 +683,47 @@ fun MapScreen(
                     .size(36.dp)
             )
 
+            if (hasLocationPermission) {
+                SmallFloatingActionButton(
+                    onClick = {
+                        val location = userLocation
+                        if (location != null) {
+                            mapView.controller.animateTo(location, maxOf(mapView.zoomLevelDouble, 15.0), null)
+                        } else {
+                            Toast.makeText(context, "Finding your location…", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    containerColor = Color.White,
+                    contentColor = Color.DarkGray,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(12.dp)
+                ) {
+                    Icon(Icons.Default.MyLocation, contentDescription = "My location")
+                }
+            }
+
             ExtendedFloatingActionButton(
-                onClick = { startPlacing(cameraPositionState.position.target) },
+                onClick = {
+                    val center = mapView.mapCenter
+                    startPlacing(GeoPoint(center.latitude, center.longitude))
+                },
                 icon = { Icon(Icons.Default.AddLocationAlt, contentDescription = null) },
                 text = { Text("Place memorial") },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 24.dp)
+            )
+
+            // Attribution required by the OpenStreetMap tile usage policy
+            Text(
+                text = "© OpenStreetMap contributors",
+                color = Color.DarkGray,
+                fontSize = 10.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .background(Color.White.copy(alpha = 0.7f))
+                    .padding(horizontal = 4.dp, vertical = 1.dp)
             )
         }
     }

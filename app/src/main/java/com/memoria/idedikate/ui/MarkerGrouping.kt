@@ -42,7 +42,7 @@ private fun overlaps(a: MemorialItem, b: MemorialItem, zoom: Float, markerScale:
         northMeters < MARKER_HEIGHT_DP * markerScale * OVERLAP_FRACTION * metersPerDp
 }
 
-/** Ground distance one dp of map covers (Google Maps: the world is 256 dp wide at zoom 0). */
+/** Ground distance one dp of map covers (the map scales tiles to dpi, so the world is 256 dp wide at zoom 0). */
 private fun metersPerDp(latitude: Double, zoom: Float): Double =
     EQUATOR_METERS_PER_DP_AT_ZOOM_0 * cos(Math.toRadians(latitude)) / 2.0.pow(zoom.toDouble())
 
